@@ -1,9 +1,12 @@
 [build]
-  command = "mkdir -p bin && CGO_ENABLED=0 GOOS=linux go build -o bin/api ./netlify/functions/api/main.go"
+  command = "mkdir -p bin && CGO_ENABLED=0 GOOS=linux go build -o bin/api ./netlify/functions/api/main.go && CGO_ENABLED=0 GOOS=linux go build -o bin/cron ./netlify/functions/cron/main.go"
   publish = "public"
 
 [functions]
   directory = "bin"
+
+[functions.cron]
+  schedule = "*/10 * * * *"
 
 [[redirects]]
   from = "/*"

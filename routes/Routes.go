@@ -42,7 +42,10 @@ func setupAPIRoutes(api *gin.RouterGroup, db *gorm.DB, logger *zap.SugaredLogger
 	// Statistics route
 	api.GET("/statistics", handlers.GetStatistics(db, logger))
 
-	// Auto-absen trigger route (Admin only)
+	// Auto-absen trigger routes
+	// 1. For Automated Cron (Uses GET and CRON_SECRET)
+	api.GET("/auto-absen/trigger", middleware.CronMiddleware(), handlers.TriggerAutoAbsen(db, logger))
+	// 2. For Admin (Manual trigger, uses POST and Admin JWT)
 	api.POST("/auto-absen/trigger", middleware.AuthMiddleware("admin"), handlers.TriggerAutoAbsen(db, logger))
 
 	// Notification route - for admin, guru, wali_kelas
