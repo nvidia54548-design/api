@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"github.com/syumai/workers"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -191,7 +192,14 @@ func main() {
 		}
 	}
 
-	// Create HTTP server with timeouts
+	// Check if running as a Cloudflare Worker
+	if os.Getenv("WORKER_MODE") == "true" {
+		sugar.Info("Running in Cloudflare Worker mode")
+		workers.Serve(router)
+		return
+	}
+
+	// Create HTTP server with timeouts for standard environments
 	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      router,
@@ -208,7 +216,7 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
+	// Graceful shutdown (only for standard environments)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

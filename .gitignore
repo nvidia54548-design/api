@@ -43,3 +43,8 @@ google-services.json
 main 
 absensholat-api 
 .env 
+
+# Deployment
+.netlify/
+.wrangler/
+main.wasm

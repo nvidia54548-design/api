@@ -5,8 +5,6 @@ go 1.24.0
 require (
 	cloud.google.com/go/firestore v1.21.0
 	firebase.google.com/go/v4 v4.18.0
-	github.com/aws/aws-lambda-go v1.54.0
-	github.com/awslabs/aws-lambda-go-api-proxy v0.16.2
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-contrib/gzip v0.0.6
 	github.com/gin-gonic/gin v1.11.0
@@ -20,6 +18,7 @@ require (
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
+	github.com/syumai/workers v0.32.0
 	github.com/xuri/excelize/v2 v2.10.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.47.0
