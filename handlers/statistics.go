@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"absensholat-api/models"
 	"absensholat-api/utils"
 )
 
@@ -50,9 +51,23 @@ func GetStatistics(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		var response StatisticsResponse
 		cache := utils.GetCache()
 
+		// Role-based filtering for Wali Kelas
+		role, _ := c.Get("role")
+		var kelasFilter string
+		if role != nil && role.(string) == "wali_kelas" {
+			nip, _ := c.Get("nip")
+			if nip != nil {
+				var guru models.Guru
+				if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
+					kelasFilter = guru.KelasWali
+					cacheKey += ":" + kelasFilter
+				}
+			}
+		}
+
 		// Try to get from cache first, or compute if not cached
 		err := cache.GetOrSet(ctx, cacheKey, &response, utils.CacheTTLStatistics, func() (interface{}, error) {
-			return computeStatistics(db, logger)
+			return computeStatistics(db, logger, kelasFilter)
 		})
 
 		if err != nil {
@@ -68,7 +83,7 @@ func GetStatistics(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 }
 
 // computeStatistics calculates statistics data using optimized queries
-func computeStatistics(db *gorm.DB, logger *zap.SugaredLogger) (StatisticsResponse, error) {
+func computeStatistics(db *gorm.DB, logger *zap.SugaredLogger, kelas string) (StatisticsResponse, error) {
 	today := utils.GetJakartaDateString()
 
 	// Use a single raw query to get all statistics including izin/sakit breakdown
@@ -85,19 +100,52 @@ func computeStatistics(db *gorm.DB, logger *zap.SugaredLogger) (StatisticsRespon
 	}
 
 	var stats StatsResult
-	query := `
-		SELECT 
-			(SELECT COUNT(*) FROM siswa) as total_siswa,
-			(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ?) as today_total,
-			(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'hadir') as today_hadir,
-			(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'izin') as today_izin,
-			(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'sakit') as today_sakit,
-			(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) NOT IN ('hadir')) as today_tidak_hadir,
-			(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) IN ('alpha','alpa')) as today_alpha,
-			(SELECT COUNT(*) FROM absensi) as all_time_total,
-			(SELECT COUNT(*) FROM absensi WHERE LOWER(TRIM(status)) = 'hadir') as all_time_hadir
-	`
-	if err := db.Raw(query, today, today, today, today, today, today).Scan(&stats).Error; err != nil {
+	var query string
+	var args []interface{}
+
+	if kelas != "" {
+		// Filtered by class for Wali Kelas
+		query = `
+			SELECT 
+				(SELECT COUNT(*) FROM siswa WHERE kelas = ?) as total_siswa,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ?) as today_total,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'hadir') as today_hadir,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'izin') as today_izin,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'sakit') as today_sakit,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) NOT IN ('hadir')) as today_tidak_hadir,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) IN ('alpha','alpa')) as today_alpha,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ?) as all_time_total,
+				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND LOWER(TRIM(a.status)) = 'hadir') as all_time_hadir
+		`
+		args = []interface{}{
+			kelas,
+			kelas, today,
+			kelas, today,
+			kelas, today,
+			kelas, today,
+			kelas, today,
+			kelas, today,
+			kelas,
+			kelas,
+		}
+	} else {
+		// Global stats for Admin
+		query = `
+			SELECT 
+				(SELECT COUNT(*) FROM siswa) as total_siswa,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ?) as today_total,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'hadir') as today_hadir,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'izin') as today_izin,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'sakit') as today_sakit,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) NOT IN ('hadir')) as today_tidak_hadir,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) IN ('alpha','alpa')) as today_alpha,
+				(SELECT COUNT(*) FROM absensi) as all_time_total,
+				(SELECT COUNT(*) FROM absensi WHERE LOWER(TRIM(status)) = 'hadir') as all_time_hadir
+		`
+		args = []interface{}{today, today, today, today, today, today}
+	}
+
+	if err := db.Raw(query, args...).Scan(&stats).Error; err != nil {
 		return StatisticsResponse{}, err
 	}
 

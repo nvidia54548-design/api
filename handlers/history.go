@@ -308,6 +308,20 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			req.Limit = 100
 		}
 
+		// Role-based restrictions for Wali Kelas
+		role, _ := c.Get("role")
+		if role != nil && role.(string) == "wali_kelas" {
+			nip, _ := c.Get("nip")
+			if nip != nil {
+				var guru models.Guru
+				if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
+					// Force the class filter to be the teacher's class
+					req.Kelas = guru.KelasWali
+					logger.Infow("Wali Kelas class filter enforced", "class", req.Kelas)
+				}
+			}
+		}
+
 		// Build base query
 		baseQuery := db.Model(&models.Absensi{}).
 			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis")
