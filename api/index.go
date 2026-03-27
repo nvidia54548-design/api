@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log" // Added log import
+
 	// Added math/rand import
 	"net/http"
 	"os"
@@ -159,6 +160,7 @@ func initGin() {
 
 // Handler is the entrypoint for Vercel serverless function
 func Handler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Vercel Request Path:", r.URL.Path)
 	once.Do(initGin)
 
 	if initErr != nil {
