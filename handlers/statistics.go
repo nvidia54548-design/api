@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -51,16 +52,19 @@ func GetStatistics(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		var response StatisticsResponse
 		cache := utils.GetCache()
 
-		// Role-based filtering for Wali Kelas
+		// Role-based filtering for Wali Kelas (handle variations)
 		role, _ := c.Get("role")
 		var kelasFilter string
-		if role != nil && role.(string) == "wali_kelas" {
-			nip, _ := c.Get("nip")
-			if nip != nil {
-				var guru models.Guru
-				if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
-					kelasFilter = guru.KelasWali
-					cacheKey += ":" + kelasFilter
+		if role != nil {
+			roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
+			if roleStr == "wali_kelas" || roleStr == "wali kelas" {
+				nip, _ := c.Get("nip")
+				if nip != nil {
+					var guru models.Guru
+					if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
+						kelasFilter = guru.KelasWali
+						cacheKey += ":" + kelasFilter
+					}
 				}
 			}
 		}

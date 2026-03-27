@@ -134,14 +134,17 @@ func GetSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		// Build query
 		query := db.Model(&models.Siswa{})
 
-		// Role-based filtering for Wali Kelas
+		// Role-based filtering for Wali Kelas (handle variations like 'wali kelas' or 'wali_kelas')
 		role, _ := c.Get("role")
-		if role != nil && role.(string) == "wali_kelas" {
-			nip, _ := c.Get("nip")
-			if nip != nil {
-				var guru models.Guru
-				if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
-					query = query.Where("kelas = ?", guru.KelasWali)
+		if role != nil {
+			roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
+			if roleStr == "wali_kelas" || roleStr == "wali kelas" {
+				nip, _ := c.Get("nip")
+				if nip != nil {
+					var guru models.Guru
+					if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
+						query = query.Where("kelas = ?", guru.KelasWali)
+					}
 				}
 			}
 		}
@@ -599,9 +602,9 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Role-based restrictions for Wali Kelas
 		role, _ := c.Get("role")
-		userRole := role.(string)
+		userRole := strings.ToLower(strings.TrimSpace(role.(string)))
 
-		if userRole == "wali_kelas" {
+		if userRole == "wali_kelas" || userRole == "wali kelas" {
 			nip, _ := c.Get("nip")
 			userNip := nip.(string)
 
