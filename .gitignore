@@ -43,3 +43,9 @@ google-services.json
 main 
 absensholat-api 
 .env 
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
