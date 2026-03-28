@@ -48,3 +48,6 @@ absensholat-api
 .netlify/
 .wrangler/
 main.wasm
+
+.vercel
+.env*.local

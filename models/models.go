@@ -35,6 +35,7 @@ type JadwalSholat struct {
 	WaktuMulai   string    `gorm:"column:waktu_mulai;type:time" json:"waktu_mulai"`
 	WaktuSelesai string    `gorm:"column:waktu_selesai;type:time" json:"waktu_selesai"`
 	Jurusan      string    `json:"jurusan"`
+	Kelas        string    `json:"kelas"`
 	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 

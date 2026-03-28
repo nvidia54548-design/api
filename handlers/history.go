@@ -267,7 +267,7 @@ type AbsensiStaffItem struct {
 
 // GetHistoryStaff godoc
 // @Summary Ambil riwayat absensi untuk staff (admin/guru/wali_kelas)
-// @Description Mengambil riwayat absensi semua siswa dengan filter. Hanya untuk admin, guru, dan wali kelas
+// @Description Mengambil riwayat absensi semua siswa dengan filter. Hanya untuk admin, guru, dan wali_kelas
 // @Tags history
 // @Accept json
 // @Produce json
@@ -313,7 +313,7 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		role, _ := c.Get("role")
 		if role != nil {
 			roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
-			if roleStr == "wali_kelas" || roleStr == "wali kelas" {
+			if roleStr == "wali_kelas" {
 				nip, _ := c.Get("nip")
 				if nip != nil {
 					var guru models.Guru

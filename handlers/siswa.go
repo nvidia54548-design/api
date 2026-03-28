@@ -138,7 +138,7 @@ func GetSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		role, _ := c.Get("role")
 		if role != nil {
 			roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
-			if roleStr == "wali_kelas" || roleStr == "wali kelas" {
+			if roleStr == "wali_kelas" {
 				nip, _ := c.Get("nip")
 				if nip != nil {
 					var guru models.Guru
@@ -604,7 +604,7 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		role, _ := c.Get("role")
 		userRole := strings.ToLower(strings.TrimSpace(role.(string)))
 
-		if userRole == "wali_kelas" || userRole == "wali kelas" {
+		if userRole == "wali_kelas" {
 			nip, _ := c.Get("nip")
 			userNip := nip.(string)
 

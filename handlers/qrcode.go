@@ -36,7 +36,7 @@ type QRCodeData struct {
 
 // GenerateQRCode godoc
 // @Summary Generate QR Code dengan format JSON (Base64)
-// @Description Menghasilkan QR code untuk sesi absensi sholat aktif dan mengembalikannya sebagai data base64 dalam response JSON. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Digunakan untuk menampilkan QR code di layar atau aplikasi mobile untuk siswa scan. Hanya untuk admin, guru, atau wali kelas
+// @Description Menghasilkan QR code untuk sesi absensi sholat aktif dan mengembalikannya sebagai data base64 dalam response JSON. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Digunakan untuk menampilkan QR code di layar atau aplikasi mobile untuk siswa scan. Hanya untuk admin, guru, atau wali_kelas
 // @Tags qrcode
 // @Accept json
 // @Produce json
@@ -438,7 +438,7 @@ func splitPayload(payload string) []string {
 
 // GenerateQRCodeImage godoc
 // @Summary Download QR Code sebagai file PNG
-// @Description Menghasilkan dan mendownload QR code sebagai file PNG untuk sesi absensi sholat aktif. Mengembalikan file PNG 256x256 pixel dengan error correction level Medium. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Gunakan endpoint ini untuk mencetak atau menampilkan QR code di layar. Hanya untuk admin, guru, atau wali kelas
+// @Description Menghasilkan dan mendownload QR code sebagai file PNG untuk sesi absensi sholat aktif. Mengembalikan file PNG 256x256 pixel dengan error correction level Medium. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Gunakan endpoint ini untuk mencetak atau menampilkan QR code di layar. Hanya untuk admin, guru, atau wali_kelas
 // @Tags qrcode
 // @Accept json
 // @Produce image/png

@@ -1045,7 +1045,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Mengambil riwayat absensi semua siswa dengan filter. Hanya untuk admin, guru, dan wali kelas",
+                "description": "Mengambil riwayat absensi semua siswa dengan filter. Hanya untuk admin, guru, dan wali_kelas",
                 "consumes": [
                     "application/json"
                 ],
@@ -1479,7 +1479,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Menghasilkan QR code untuk sesi absensi sholat aktif dan mengembalikannya sebagai data base64 dalam response JSON. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Digunakan untuk menampilkan QR code di layar atau aplikasi mobile untuk siswa scan. Hanya untuk admin, guru, atau wali kelas",
+                "description": "Menghasilkan QR code untuk sesi absensi sholat aktif dan mengembalikannya sebagai data base64 dalam response JSON. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Digunakan untuk menampilkan QR code di layar atau aplikasi mobile untuk siswa scan. Hanya untuk admin, guru, atau wali_kelas",
                 "consumes": [
                     "application/json"
                 ],
@@ -1524,7 +1524,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Akses ditolak - hanya admin, guru, atau wali kelas yang dapat mengakses",
+                        "description": "Akses ditolak - hanya admin, guru, atau wali_kelas yang dapat mengakses",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -1551,7 +1551,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Menghasilkan dan mendownload QR code sebagai file PNG untuk sesi absensi sholat aktif. Mengembalikan file PNG 256x256 pixel dengan error correction level Medium. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Gunakan endpoint ini untuk mencetak atau menampilkan QR code di layar. Hanya untuk admin, guru, atau wali kelas",
+                "description": "Menghasilkan dan mendownload QR code sebagai file PNG untuk sesi absensi sholat aktif. Mengembalikan file PNG 256x256 pixel dengan error correction level Medium. QR code berisi token yang ter-sign dan berlaku selama 5 menit. Gunakan endpoint ini untuk mencetak atau menampilkan QR code di layar. Hanya untuk admin, guru, atau wali_kelas",
                 "consumes": [
                     "application/json"
                 ],
@@ -1596,7 +1596,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Akses ditolak - hanya admin, guru, atau wali kelas yang dapat mengakses",
+                        "description": "Akses ditolak - hanya admin, guru, atau wali_kelas yang dapat mengakses",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }

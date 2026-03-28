@@ -57,7 +57,7 @@ func GetStatistics(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		var kelasFilter string
 		if role != nil {
 			roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
-			if roleStr == "wali_kelas" || roleStr == "wali kelas" {
+			if roleStr == "wali_kelas" {
 				nip, _ := c.Get("nip")
 				if nip != nil {
 					var guru models.Guru

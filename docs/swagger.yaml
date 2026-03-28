@@ -1338,7 +1338,7 @@ paths:
       consumes:
       - application/json
       description: Mengambil riwayat absensi semua siswa dengan filter. Hanya untuk
-        admin, guru, dan wali kelas
+        admin, guru, dan wali_kelas
       parameters:
       - description: 'Tanggal mulai (format: YYYY-MM-DD)'
         in: query
@@ -1621,7 +1621,7 @@ paths:
       description: Menghasilkan QR code untuk sesi absensi sholat aktif dan mengembalikannya
         sebagai data base64 dalam response JSON. QR code berisi token yang ter-sign
         dan berlaku selama 5 menit. Digunakan untuk menampilkan QR code di layar atau
-        aplikasi mobile untuk siswa scan. Hanya untuk admin, guru, atau wali kelas
+        aplikasi mobile untuk siswa scan. Hanya untuk admin, guru, atau wali_kelas
       parameters:
       - description: Set to 'true' to force-generate QR for testing (non-production
           only)
@@ -1649,7 +1649,7 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "403":
-          description: Akses ditolak - hanya admin, guru, atau wali kelas yang dapat
+          description: Akses ditolak - hanya admin, guru, atau wali_kelas yang dapat
             mengakses
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
@@ -1674,7 +1674,7 @@ paths:
         absensi sholat aktif. Mengembalikan file PNG 256x256 pixel dengan error correction
         level Medium. QR code berisi token yang ter-sign dan berlaku selama 5 menit.
         Gunakan endpoint ini untuk mencetak atau menampilkan QR code di layar. Hanya
-        untuk admin, guru, atau wali kelas
+        untuk admin, guru, atau wali_kelas
       parameters:
       - description: Set to 'true' to force-generate QR for testing (non-production
           only)
@@ -1701,7 +1701,7 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "403":
-          description: Akses ditolak - hanya admin, guru, atau wali kelas yang dapat
+          description: Akses ditolak - hanya admin, guru, atau wali_kelas yang dapat
             mengakses
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'

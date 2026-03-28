@@ -1,9 +1,9 @@
 -- Add proper jadwal sholat for Dhuha, Dzuhur, and Jumat
--- For all jurusan: TKJ, RPL, TEI, BCF, DKV, ANM, TAV, TMT
+-- For all jurusan: TKJ, RPL, TEI, BC, DKV, ANM, TAV, TMT
 -- For days: Senin to Jumat (weekdays except weekend)
 
 -- Jurusan list
--- TKJ, RPL, TEI, BCF, DKV, ANM, TAV, TMT
+-- TKJ, RPL, TEI, BC, DKV, ANM, TAV, TMT
 
 -- Days: Senin, Selasa, Rabu, Kamis, Jumat
 
@@ -34,12 +34,12 @@ INSERT INTO jadwal_sholat (hari, jenis_sholat, waktu_mulai, waktu_selesai, jurus
 ('Kamis', 'Dhuha', '07:00:00', '08:00:00', 'TEI'),
 ('Jumat', 'Dhuha', '07:00:00', '08:00:00', 'TEI'),
 
--- BCF
-('Senin', 'Dhuha', '07:00:00', '08:00:00', 'BCF'),
-('Selasa', 'Dhuha', '07:00:00', '08:00:00', 'BCF'),
-('Rabu', 'Dhuha', '07:00:00', '08:00:00', 'BCF'),
-('Kamis', 'Dhuha', '07:00:00', '08:00:00', 'BCF'),
-('Jumat', 'Dhuha', '07:00:00', '08:00:00', 'BCF'),
+-- BC
+('Senin', 'Dhuha', '07:00:00', '08:00:00', 'BC'),
+('Selasa', 'Dhuha', '07:00:00', '08:00:00', 'BC'),
+('Rabu', 'Dhuha', '07:00:00', '08:00:00', 'BC'),
+('Kamis', 'Dhuha', '07:00:00', '08:00:00', 'BC'),
+('Jumat', 'Dhuha', '07:00:00', '08:00:00', 'BC'),
 
 -- DKV
 ('Senin', 'Dhuha', '07:00:00', '08:00:00', 'DKV'),
@@ -89,11 +89,11 @@ INSERT INTO jadwal_sholat (hari, jenis_sholat, waktu_mulai, waktu_selesai, jurus
 ('Rabu', 'Dzuhur', '12:00:00', '13:00:00', 'TEI'),
 ('Kamis', 'Dzuhur', '12:00:00', '13:00:00', 'TEI'),
 
--- BCF
-('Senin', 'Dzuhur', '12:00:00', '13:00:00', 'BCF'),
-('Selasa', 'Dzuhur', '12:00:00', '13:00:00', 'BCF'),
-('Rabu', 'Dzuhur', '12:00:00', '13:00:00', 'BCF'),
-('Kamis', 'Dzuhur', '12:00:00', '13:00:00', 'BCF'),
+-- BC
+('Senin', 'Dzuhur', '12:00:00', '13:00:00', 'BC'),
+('Selasa', 'Dzuhur', '12:00:00', '13:00:00', 'BC'),
+('Rabu', 'Dzuhur', '12:00:00', '13:00:00', 'BC'),
+('Kamis', 'Dzuhur', '12:00:00', '13:00:00', 'BC'),
 
 -- DKV
 ('Senin', 'Dzuhur', '12:00:00', '13:00:00', 'DKV'),
@@ -124,7 +124,7 @@ INSERT INTO jadwal_sholat (hari, jenis_sholat, waktu_mulai, waktu_selesai, jurus
 ('Jumat', 'Jumat', '12:00:00', '13:00:00', 'TKJ'),
 ('Jumat', 'Jumat', '12:00:00', '13:00:00', 'RPL'),
 ('Jumat', 'Jumat', '12:00:00', '13:00:00', 'TEI'),
-('Jumat', 'Jumat', '12:00:00', '13:00:00', 'BCF'),
+('Jumat', 'Jumat', '12:00:00', '13:00:00', 'BC'),
 ('Jumat', 'Jumat', '12:00:00', '13:00:00', 'DKV'),
 ('Jumat', 'Jumat', '12:00:00', '13:00:00', 'ANM'),
 ('Jumat', 'Jumat', '12:00:00', '13:00:00', 'TAV'),
