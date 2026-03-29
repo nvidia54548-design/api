@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"absensholat-api/models"
+	"absensholat-api/utils"
 )
 
 type ExportAbsensiRequest struct {
@@ -1109,5 +1110,480 @@ func ExportLaporanExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 			"total_records", len(absensiList),
 			"stats", stats,
 		)
+	}
+}
+
+// ExportAttendanceReportExcel godoc
+// @Summary Export high-fidelity report absensi ke Excel
+// @Description Mengexport laporan absensi sholat siswa dalam format Excel dengan pengelompokan per hari dan pewarnaan status kustom.
+// @Tags export
+// @Accept json
+// @Produce application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param start_date query string true "Tanggal mulai (format: YYYY-MM-DD)"
+// @Param end_date query string true "Tanggal akhir (format: YYYY-MM-DD)"
+// @Param jurusan query string true "Nama Jurusan (e.g., PPLG)"
+// @Security BearerAuth
+// @Success 200 {file} file "File Excel laporan berhasil didownload"
+// @Router /export/attendance-report [get]
+func ExportAttendanceReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		startDate := c.Query("start_date")
+		endDate := c.Query("end_date")
+		jurusan := c.Query("jurusan")
+
+		if startDate == "" || endDate == "" || jurusan == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "start_date, end_date, dan jurusan wajib diisi"})
+			return
+		}
+
+		// Data structures for aggregation
+		type RawData struct {
+			NIS         string
+			NamaSiswa   string
+			Jurusan     string
+			Tanggal     time.Time
+			JenisSholat string
+			Status      string
+		}
+
+		var rawResults []RawData
+		err := db.Table("siswa s").
+			Select("s.nis, s.nama_siswa, s.jurusan, a.tanggal, j.jenis_sholat, a.status").
+			Joins("LEFT JOIN absensi a ON s.nis = a.nis").
+			Joins("LEFT JOIN jadwal_sholat j ON a.id_jadwal = j.id_jadwal").
+			Where("s.jurusan = ?", jurusan).
+			Where("a.tanggal BETWEEN ? AND ?", startDate, endDate).
+			Scan(&rawResults).Error
+
+		if err != nil {
+			logger.Errorw("Failed to fetch raw data for aggregated report", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal mengambil data laporan"})
+			return
+		}
+
+		type RowKey struct {
+			NIS     string
+			Tanggal string
+		}
+		type ReportRow struct {
+			NIS          string
+			Nama         string
+			Jurusan      string
+			Tanggal      string
+			Dhuha        string
+			DzuhurJumat  string
+			HadirCount   int
+			IzinSakitCnt int
+			AlphaCount   int
+		}
+
+		// Grouping logic
+		rowsMap := make(map[RowKey]*ReportRow)
+		var sortedKeys []RowKey
+
+		for _, item := range rawResults {
+			dateStr := item.Tanggal.Format("02-01-2006")
+			key := RowKey{NIS: item.NIS, Tanggal: dateStr}
+
+			if _, exists := rowsMap[key]; !exists {
+				rowsMap[key] = &ReportRow{
+					NIS:         item.NIS,
+					Nama:        item.NamaSiswa,
+					Jurusan:     item.Jurusan,
+					Tanggal:     dateStr,
+					Dhuha:       "-",
+					DzuhurJumat: "-",
+				}
+				sortedKeys = append(sortedKeys, key)
+			}
+
+			row := rowsMap[key]
+			status := item.Status
+
+			// Map to columns
+			if item.JenisSholat == "Dhuha" {
+				row.Dhuha = status
+			} else if item.JenisSholat == "Dzuhur" || item.JenisSholat == "Jumat" {
+				row.DzuhurJumat = status
+			}
+
+			// Aggregate totals
+			switch status {
+			case "HADIR":
+				row.HadirCount++
+			case "IZIN", "SAKIT":
+				row.IzinSakitCnt++
+			case "ALPHA":
+				row.AlphaCount++
+			}
+		}
+
+		// Create Excel
+		f := excelize.NewFile()
+		sheetName := "Data Absensi"
+		f.SetSheetName("Sheet1", sheetName)
+
+		// Styles
+		titleStyle, _ := f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Size: 14},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		subtitleStyle, _ := f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Size: 11},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		headerStyle, _ := f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Color: "FFFFFF"},
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"2F5597"}, Pattern: 1},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+		})
+		dataStyle, _ := f.NewStyle(&excelize.Style{
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		leftAlignStyle, _ := f.NewStyle(&excelize.Style{
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "left"},
+		})
+
+		// Status Colors
+		hadirStyle, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"C6EFCE"}, Pattern: 1},
+			Font:      &excelize.Font{Color: "006100"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		alphaStyle, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"FFC7CE"}, Pattern: 1},
+			Font:      &excelize.Font{Color: "9C0006"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		izinStyle, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"FFEB9C"}, Pattern: 1},
+			Font:      &excelize.Font{Color: "9C6500"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+
+		// 1. Titles
+		f.SetCellValue(sheetName, "A1", "LAPORAN ABSENSI SHOLAT SISWA - SMK NEGERI 2 SINGOSARI")
+		f.MergeCell(sheetName, "A1", "J1")
+		f.SetCellStyle(sheetName, "A1", "A1", titleStyle)
+
+		subtitle := fmt.Sprintf("Periode: %s s/d %s | Jurusan: %s", startDate, endDate, jurusan)
+		f.SetCellValue(sheetName, "A2", subtitle)
+		f.MergeCell(sheetName, "A2", "J2")
+		f.SetCellStyle(sheetName, "A2", "A2", subtitleStyle)
+
+		// 2. Table Headers
+		headers := []string{"No", "NIS", "Nama Siswa", "Jurusan", "Tanggal", "Dhuha", "Dzuhur/Jumat", "Hadir", "Izin/Sakit", "Alpha"}
+		colWidths := []float64{5, 12, 30, 15, 15, 12, 12, 10, 12, 10}
+		for i, h := range headers {
+			colName, _ := excelize.CoordinatesToCellName(i+1, 4)
+			f.SetCellValue(sheetName, colName, h)
+			f.SetCellStyle(sheetName, colName, colName, headerStyle)
+			f.SetColWidth(sheetName, string('A'+rune(i)), string('A'+rune(i)), colWidths[i])
+		}
+
+		// 3. Data Rows
+		rowIdx := 5
+		for i, key := range sortedKeys {
+			rowData := rowsMap[key]
+
+			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), i+1)
+			f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), rowData.NIS)
+			f.SetCellValue(sheetName, fmt.Sprintf("C%d", rowIdx), rowData.Nama)
+			f.SetCellValue(sheetName, fmt.Sprintf("D%d", rowIdx), rowData.Jurusan)
+			f.SetCellValue(sheetName, fmt.Sprintf("E%d", rowIdx), rowData.Tanggal)
+			f.SetCellValue(sheetName, fmt.Sprintf("F%d", rowIdx), rowData.Dhuha)
+			f.SetCellValue(sheetName, fmt.Sprintf("G%d", rowIdx), rowData.DzuhurJumat)
+			f.SetCellValue(sheetName, fmt.Sprintf("H%d", rowIdx), rowData.HadirCount)
+			f.SetCellValue(sheetName, fmt.Sprintf("I%d", rowIdx), rowData.IzinSakitCnt)
+			f.SetCellValue(sheetName, fmt.Sprintf("J%d", rowIdx), rowData.AlphaCount)
+
+			// Simple Alignment
+			f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("B%d", rowIdx), dataStyle)
+			f.SetCellStyle(sheetName, fmt.Sprintf("C%d", rowIdx), fmt.Sprintf("C%d", rowIdx), leftAlignStyle)
+			f.SetCellStyle(sheetName, fmt.Sprintf("D%d", rowIdx), fmt.Sprintf("E%d", rowIdx), dataStyle)
+			f.SetCellStyle(sheetName, fmt.Sprintf("H%d", rowIdx), fmt.Sprintf("J%d", rowIdx), dataStyle)
+
+			// Conditional Formatting for Dhuha
+			switch rowData.Dhuha {
+			case "HADIR":
+				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), hadirStyle)
+			case "ALPHA":
+				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), alphaStyle)
+			case "IZIN", "SAKIT":
+				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), izinStyle)
+			default:
+				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), dataStyle)
+			}
+
+			// Conditional Formatting for Dzuhur/Jumat
+			switch rowData.DzuhurJumat {
+			case "HADIR":
+				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), hadirStyle)
+			case "ALPHA":
+				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), alphaStyle)
+			case "IZIN", "SAKIT":
+				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), izinStyle)
+			default:
+				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), dataStyle)
+			}
+
+			rowIdx++
+		}
+
+		// 4. Response
+		fileName := fmt.Sprintf("Laporan_Absensi_%s_%s.xlsx", jurusan, time.Now().Format("Jan_2006"))
+		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+		f.Write(c.Writer)
+	}
+}
+
+// ExportIntegratedReportExcel godoc
+// @Summary Export laporan lengkap (Absensi & Jadwal) ke Excel
+// @Description Mengexport file Excel terintegrasi dengan dua sheet: Laporan Absensi dan Jadwal Sholat Referensi.
+// @Tags export
+// @Accept json
+// @Produce application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param month query string true "Bulan laporan (format: YYYY-MM, e.g., 2026-03)"
+// @Param jurusan query string true "Nama Jurusan (e.g., PPLG)"
+// @Security BearerAuth
+// @Router /export/full-report [get]
+func ExportIntegratedReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		monthStr := c.Query("month") // YYYY-MM
+		jurusan := c.Query("jurusan")
+
+		if monthStr == "" || jurusan == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "month dan jurusan wajib diisi"})
+			return
+		}
+
+		// Calculate date range
+		targetMonth, err := time.Parse("2006-01", monthStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Format month tidak valid (harus YYYY-MM)"})
+			return
+		}
+		startDate := targetMonth.Format("2006-01-01")
+		endDate := targetMonth.AddDate(0, 1, -1).Format("2006-01-02")
+
+		f := excelize.NewFile()
+		defer f.Close()
+
+		// --- STYLES ---
+		titleStyle, _ := f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Size: 14},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		headerStyle, _ := f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Color: "FFFFFF"},
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"2F5597"}, Pattern: 1},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+		})
+		dataStyle, _ := f.NewStyle(&excelize.Style{
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		leftDataStyle, _ := f.NewStyle(&excelize.Style{
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "left"},
+		})
+
+		hadirFill, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"C6EFCE"}, Pattern: 1},
+			Font:      &excelize.Font{Color: "006100"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		alphaFill, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"FFC7CE"}, Pattern: 1},
+			Font:      &excelize.Font{Color: "9C0006"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+		izinFill, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"FFEB9C"}, Pattern: 1},
+			Font:      &excelize.Font{Color: "9C6500"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
+			Alignment: &excelize.Alignment{Horizontal: "center"},
+		})
+
+		// --- SHEET 1: Laporan_Absensi ---
+		sheet1 := "Laporan_Absensi"
+		f.SetSheetName("Sheet1", sheet1)
+		f.SetCellValue(sheet1, "A1", "LAPORAN KEHADIRAN SHOLAT SISWA - SMK NEGERI 2 SINGOSARI")
+		f.MergeCell(sheet1, "A1", "H1")
+		f.SetCellStyle(sheet1, "A1", "A1", titleStyle)
+		f.SetCellValue(sheet1, "A2", fmt.Sprintf("Periode: %s | Jurusan: %s", monthStr, jurusan))
+		f.MergeCell(sheet1, "A2", "H2")
+		f.SetCellStyle(sheet1, "A2", "A2", titleStyle)
+
+		headers1 := []string{"No", "NIS", "Nama Siswa", "Tanggal", "Dhuha", "Dzuhur/Jumat", "Total Hadir", "Total Alpha"}
+		widths1 := []float64{5, 15, 30, 15, 12, 15, 12, 12}
+		for i, h := range headers1 {
+			cell, _ := excelize.CoordinatesToCellName(i+1, 4)
+			f.SetCellValue(sheet1, cell, h)
+			f.SetCellStyle(sheet1, cell, cell, headerStyle)
+			f.SetColWidth(sheet1, string('A'+rune(i)), string('A'+rune(i)), widths1[i])
+		}
+		f.AutoFilter(sheet1, "A4:H4", nil)
+		f.SetPanes(sheet1, &excelize.Panes{
+			Freeze:      true,
+			Split:       false,
+			XSplit:      0,
+			YSplit:      4,
+			TopLeftCell: "A5",
+			ActivePane:  "bottomLeft",
+		})
+
+		type RawData struct {
+			NIS         string
+			NamaSiswa   string
+			Jurusan     string
+			Tanggal     time.Time
+			JenisSholat string
+			Status      string
+		}
+		var rawResults []RawData
+		db.Table("siswa s").
+			Select("s.nis, s.nama_siswa, s.jurusan, a.tanggal, j.jenis_sholat, a.status").
+			Joins("LEFT JOIN absensi a ON s.nis = a.nis AND a.tanggal BETWEEN ? AND ?", startDate, endDate).
+			Joins("LEFT JOIN jadwal_sholat j ON a.id_jadwal = j.id_jadwal").
+			Where("s.jurusan = ?", jurusan).Scan(&rawResults)
+
+		type RowKey struct {
+			NIS     string
+			Tanggal string
+		}
+		type ReportRow struct {
+			NIS         string
+			Nama        string
+			Tanggal     string
+			Dhuha       string
+			DzuhurJumat string
+			HadirCount  int
+			AlphaCount  int
+		}
+		rowsMap := make(map[RowKey]*ReportRow)
+		var sortedKeys []RowKey
+		for _, item := range rawResults {
+			if item.NIS == "" || item.Tanggal.IsZero() {
+				continue
+			}
+			key := RowKey{NIS: item.NIS, Tanggal: item.Tanggal.Format("02-01-2006")}
+			if _, exists := rowsMap[key]; !exists {
+				rowsMap[key] = &ReportRow{NIS: item.NIS, Nama: item.NamaSiswa, Tanggal: key.Tanggal, Dhuha: "-", DzuhurJumat: "-"}
+				sortedKeys = append(sortedKeys, key)
+			}
+			r := rowsMap[key]
+			if item.JenisSholat == "Dhuha" {
+				r.Dhuha = item.Status
+			} else if item.JenisSholat == "Dzuhur" || item.JenisSholat == "Jumat" {
+				r.DzuhurJumat = item.Status
+			}
+			if item.Status == "HADIR" {
+				r.HadirCount++
+			} else if item.Status == "ALPHA" {
+				r.AlphaCount++
+			}
+		}
+
+		rIdx := 5
+		for i, k := range sortedKeys {
+			d := rowsMap[k]
+			f.SetCellValue(sheet1, fmt.Sprintf("A%d", rIdx), i+1)
+			f.SetCellValue(sheet1, fmt.Sprintf("B%d", rIdx), d.NIS)
+			f.SetCellValue(sheet1, fmt.Sprintf("C%d", rIdx), d.Nama)
+			f.SetCellValue(sheet1, fmt.Sprintf("D%d", rIdx), d.Tanggal)
+			f.SetCellValue(sheet1, fmt.Sprintf("E%d", rIdx), d.Dhuha)
+			f.SetCellValue(sheet1, fmt.Sprintf("F%d", rIdx), d.DzuhurJumat)
+			f.SetCellValue(sheet1, fmt.Sprintf("G%d", rIdx), d.HadirCount)
+			f.SetCellValue(sheet1, fmt.Sprintf("H%d", rIdx), d.AlphaCount)
+			f.SetCellStyle(sheet1, fmt.Sprintf("A%d", rIdx), fmt.Sprintf("B%d", rIdx), dataStyle)
+			f.SetCellStyle(sheet1, fmt.Sprintf("C%d", rIdx), fmt.Sprintf("C%d", rIdx), leftDataStyle)
+			f.SetCellStyle(sheet1, fmt.Sprintf("D%d", rIdx), fmt.Sprintf("D%d", rIdx), dataStyle)
+			f.SetCellStyle(sheet1, fmt.Sprintf("G%d", rIdx), fmt.Sprintf("H%d", rIdx), dataStyle)
+
+			apply := func(cell, status string) {
+				st := dataStyle
+				switch status {
+				case "HADIR":
+					st = hadirFill
+				case "ALPHA":
+					st = alphaFill
+				case "IZIN", "SAKIT":
+					st = izinFill
+				}
+				f.SetCellStyle(sheet1, cell, cell, st)
+			}
+			apply(fmt.Sprintf("E%d", rIdx), d.Dhuha)
+			apply(fmt.Sprintf("F%d", rIdx), d.DzuhurJumat)
+			rIdx++
+		}
+
+		// --- SHEET 2: Jadwal_Sholat_Referensi ---
+		sheet2 := "Jadwal_Sholat_Referensi"
+		f.NewSheet(sheet2)
+		f.SetCellValue(sheet2, "A1", "JADWAL PELAKSANAAN SHOLAT BERJAMAAH")
+		f.MergeCell(sheet2, "A1", "F1")
+		f.SetCellStyle(sheet2, "A1", "A1", titleStyle)
+		f.SetCellValue(sheet2, "A2", fmt.Sprintf("Jurusan: %s | Bulan: %s", jurusan, monthStr))
+		f.MergeCell(sheet2, "A2", "F2")
+		f.SetCellStyle(sheet2, "A2", "A2", titleStyle)
+
+		headers2 := []string{"Hari", "Tanggal", "Jenis Sholat", "Waktu Mulai", "Waktu Selesai", "Keterangan"}
+		widths2 := []float64{10, 15, 15, 12, 12, 25}
+		for i, h := range headers2 {
+			cell, _ := excelize.CoordinatesToCellName(i+1, 4)
+			f.SetCellValue(sheet2, cell, h)
+			f.SetCellStyle(sheet2, cell, cell, headerStyle)
+			f.SetColWidth(sheet2, string('A'+rune(i)), string('A'+rune(i)), widths2[i])
+		}
+		f.AutoFilter(sheet2, "A4:F4", nil)
+		f.SetPanes(sheet2, &excelize.Panes{
+			Freeze:      true,
+			Split:       false,
+			XSplit:      0,
+			YSplit:      4,
+			TopLeftCell: "A5",
+			ActivePane:  "bottomLeft",
+		})
+
+		var weeklyJadwal []models.JadwalSholat
+		db.Where("jurusan = ? OR jurusan = 'Semua Jurusan' OR jurusan = ''", jurusan).Find(&weeklyJadwal)
+		jadwalMap := make(map[string][]models.JadwalSholat)
+		for _, j := range weeklyJadwal {
+			jadwalMap[j.Hari] = append(jadwalMap[j.Hari], j)
+		}
+
+		currDate := targetMonth
+		rIdx2 := 5
+		for currDate.Month() == targetMonth.Month() {
+			dayName := utils.GetIndonesianDayName(currDate)
+			dayJadwal := jadwalMap[dayName]
+			dateStr := currDate.Format("02-01-2006")
+			for _, j := range dayJadwal {
+				f.SetCellValue(sheet2, fmt.Sprintf("A%d", rIdx2), dayName)
+				f.SetCellValue(sheet2, fmt.Sprintf("B%d", rIdx2), dateStr)
+				f.SetCellValue(sheet2, fmt.Sprintf("C%d", rIdx2), j.JenisSholat)
+				f.SetCellValue(sheet2, fmt.Sprintf("D%d", rIdx2), j.WaktuMulai)
+				f.SetCellValue(sheet2, fmt.Sprintf("E%d", rIdx2), j.WaktuSelesai)
+				f.SetCellValue(sheet2, fmt.Sprintf("F%d", rIdx2), "-")
+				f.SetCellStyle(sheet2, fmt.Sprintf("A%d", rIdx2), fmt.Sprintf("F%d", rIdx2), dataStyle)
+				rIdx2++
+			}
+			currDate = currDate.AddDate(0, 0, 1)
+		}
+		fileName := fmt.Sprintf("Laporan_Lengkap_Absensi_%s_%s.xlsx", jurusan, targetMonth.Format("Jan_2006"))
+		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+		f.Write(c.Writer)
 	}
 }

@@ -59,6 +59,8 @@ func setupAPIRoutes(api *gin.RouterGroup, db *gorm.DB, logger *zap.SugaredLogger
 		export.GET("/absensi/excel", handlers.ExportAbsensiExcel(db, logger))
 		export.GET("/laporan", handlers.ExportLaporanCSV(db, logger))
 		export.GET("/laporan/excel", handlers.ExportLaporanExcel(db, logger))
+		export.GET("/attendance-report", handlers.ExportAttendanceReportExcel(db, logger))
+		export.GET("/full-report", handlers.ExportIntegratedReportExcel(db, logger))
 	}
 
 	// Backup routes

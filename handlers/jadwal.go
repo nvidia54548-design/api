@@ -52,6 +52,7 @@ type JadwalSholatCreateRequest struct {
 	WaktuMulai   string `json:"waktu_mulai" binding:"required"`
 	WaktuSelesai string `json:"waktu_selesai" binding:"required"`
 	Jurusan      string `json:"jurusan"`
+	Kelas        string `json:"kelas"`
 }
 
 type JadwalSholatUpdateRequest struct {
@@ -60,6 +61,7 @@ type JadwalSholatUpdateRequest struct {
 	WaktuMulai   string `json:"waktu_mulai"`
 	WaktuSelesai string `json:"waktu_selesai"`
 	Jurusan      string `json:"jurusan"`
+	Kelas        string `json:"kelas"`
 }
 
 type JadwalSholatErrorResponse struct {
@@ -349,6 +351,7 @@ func CreateJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 			WaktuMulai:   req.WaktuMulai,
 			WaktuSelesai: req.WaktuSelesai,
 			Jurusan:      req.Jurusan,
+			Kelas:        req.Kelas,
 		}
 
 		if err := db.Create(&jadwal).Error; err != nil {
@@ -440,6 +443,9 @@ func UpdateJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 		}
 		if req.Jurusan != "" {
 			updates["jurusan"] = req.Jurusan
+		}
+		if req.Kelas != "" {
+			updates["kelas"] = req.Kelas
 		}
 
 		if err := db.Model(&jadwal).Updates(updates).Error; err != nil {

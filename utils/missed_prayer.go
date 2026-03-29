@@ -111,8 +111,8 @@ func RecordMissedPrayers(db *gorm.DB, logger *zap.SugaredLogger) error {
 					}
 				}
 
-				// Jurusan filtering for Dhuha
-				if prayer.JenisSholat == "Dhuha" && prayer.Jurusan != "" && prayer.Jurusan != "Semua Jurusan" {
+				// Jurusan filtering (if defined for the prayer)
+				if prayer.Jurusan != "" && prayer.Jurusan != "Semua Jurusan" {
 					if student.Jurusan != prayer.Jurusan {
 						continue
 					}
@@ -124,8 +124,8 @@ func RecordMissedPrayers(db *gorm.DB, logger *zap.SugaredLogger) error {
 						NIS:       student.NIS,
 						IDJadwal:  prayer.IDJadwal,
 						Tanggal:   tanggal,
-						Status:    "alpha",
-						Deskripsi: "Absensi otomatis - tidak hadir",
+						Status:    "ALPHA",
+						Deskripsi: fmt.Sprintf("Absensi otomatis (%s) - tidak hadir", prayer.JenisSholat),
 					}
 					missingRecords = append(missingRecords, absensi)
 				}
@@ -137,7 +137,11 @@ func RecordMissedPrayers(db *gorm.DB, logger *zap.SugaredLogger) error {
 			if err := db.CreateInBatches(missingRecords, 100).Error; err != nil {
 				logger.Errorw("Failed to bulk create missed records", "date", dateStr, "error", err.Error())
 			} else {
-				logger.Infow("Bulk recorded missed prayers", "count", len(missingRecords), "date", dateStr)
+				logger.Infow("Bulk recorded missed prayers",
+					"count", len(missingRecords),
+					"date", dateStr,
+					"prayers_processed", len(prayers),
+				)
 			}
 		}
 	}
