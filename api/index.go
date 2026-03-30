@@ -13,13 +13,10 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"absensholat-api/database"
-	_ "absensholat-api/docs"
 	"absensholat-api/routes"
 	"absensholat-api/utils"
 
@@ -36,8 +33,10 @@ var (
 
 func initLogger() {
 	cfg := zap.NewProductionConfig()
+	cfg.Encoding = "console"
 	cfg.EncoderConfig.TimeKey = "ts"
 	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 	logger, err := cfg.Build()
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
@@ -154,8 +153,6 @@ func initGin() {
 
 	routes.SetupRoutes(ginEngine, db, sugar)
 
-	// Swagger documentation
-	ginEngine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 }
 
 // Handler is the entrypoint for Vercel serverless function

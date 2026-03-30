@@ -13,15 +13,11 @@ import (
 	_ "time/tzdata" // Bundled timezone data support
 
 	"github.com/joho/godotenv"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"absensholat-api/database"
-	"absensholat-api/docs"
 	"absensholat-api/handlers"
-	"absensholat-api/middleware"
 	"absensholat-api/routes"
 	"absensholat-api/utils"
 
@@ -38,8 +34,10 @@ var db *gorm.DB
 
 func initLogger() {
 	cfg := zap.NewProductionConfig()
+	cfg.Encoding = "console"
 	cfg.EncoderConfig.TimeKey = "ts"
 	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 	logger, err := cfg.Build()
 	if err != nil {
 		panic("failed to initialize logger: " + err.Error())
@@ -167,28 +165,6 @@ func main() {
 	port := os.Getenv("API_PORT")
 	if port == "" {
 		port = "8080"
-	}
-
-	// Swagger documentation (disable in production for security)
-	if !isProduction {
-		// Configure Swagger host based on environment
-		swaggerHost := os.Getenv("SWAGGER_HOST")
-		if swaggerHost == "" {
-			swaggerHost = "localhost:" + port
-		}
-		docs.SwaggerInfo.Host = swaggerHost
-		docs.SwaggerInfo.Schemes = []string{"http"}
-		sugar.Infof("Swagger configured for host: %s", swaggerHost)
-
-		router.GET("/swagger/*any", middleware.SwaggerAuthMiddleware(), ginSwagger.WrapHandler(swaggerFiles.Handler))
-		sugar.Info("Swagger documentation enabled at /swagger/index.html")
-	} else {
-		// Production: Set production host if Swagger is ever enabled
-		swaggerHost := os.Getenv("SWAGGER_HOST")
-		if swaggerHost != "" {
-			docs.SwaggerInfo.Host = swaggerHost
-			docs.SwaggerInfo.Schemes = []string{"https"}
-		}
 	}
 
 	// Create HTTP server with timeouts
