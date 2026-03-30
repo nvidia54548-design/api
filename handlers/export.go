@@ -1131,8 +1131,9 @@ func ExportAttendanceReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.Han
 		endDate := c.Query("end_date")
 		jurusan := c.Query("jurusan")
 
-		if startDate == "" || endDate == "" || jurusan == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "start_date, end_date, dan jurusan wajib diisi"})
+		if startDate == "" || endDate == "" {
+			logger.Warnw("Export failed: missing mandatory date parameters", "start_date", startDate, "end_date", endDate, "jurusan", jurusan)
+			c.JSON(http.StatusBadRequest, gin.H{"message": "start_date dan end_date wajib diisi"})
 			return
 		}
 
@@ -1147,13 +1148,17 @@ func ExportAttendanceReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.Han
 		}
 
 		var rawResults []RawData
-		err := db.Table("siswa s").
+		query := db.Table("siswa s").
 			Select("s.nis, s.nama_siswa, s.jurusan, a.tanggal, j.jenis_sholat, a.status").
 			Joins("LEFT JOIN absensi a ON s.nis = a.nis").
 			Joins("LEFT JOIN jadwal_sholat j ON a.id_jadwal = j.id_jadwal").
-			Where("s.jurusan = ?", jurusan).
-			Where("a.tanggal BETWEEN ? AND ?", startDate, endDate).
-			Scan(&rawResults).Error
+			Where("a.tanggal BETWEEN ? AND ?", startDate, endDate)
+
+		if jurusan != "" && jurusan != "Semua Jurusan" {
+			query = query.Where("s.jurusan = ?", jurusan)
+		}
+
+		err := query.Scan(&rawResults).Error
 
 		if err != nil {
 			logger.Errorw("Failed to fetch raw data for aggregated report", "error", err.Error())
@@ -1359,8 +1364,9 @@ func ExportIntegratedReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.Han
 		monthStr := c.Query("month") // YYYY-MM
 		jurusan := c.Query("jurusan")
 
-		if monthStr == "" || jurusan == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "month dan jurusan wajib diisi"})
+		if monthStr == "" {
+			logger.Warnw("Export full-report failed: missing mandatory month parameter", "month", monthStr, "jurusan", jurusan)
+			c.JSON(http.StatusBadRequest, gin.H{"message": "month(YYYY-MM) wajib diisi"})
 			return
 		}
 
@@ -1452,11 +1458,16 @@ func ExportIntegratedReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.Han
 			Status      string
 		}
 		var rawResults []RawData
-		db.Table("siswa s").
+		query := db.Table("siswa s").
 			Select("s.nis, s.nama_siswa, s.jurusan, a.tanggal, j.jenis_sholat, a.status").
 			Joins("LEFT JOIN absensi a ON s.nis = a.nis AND a.tanggal BETWEEN ? AND ?", startDate, endDate).
-			Joins("LEFT JOIN jadwal_sholat j ON a.id_jadwal = j.id_jadwal").
-			Where("s.jurusan = ?", jurusan).Scan(&rawResults)
+			Joins("LEFT JOIN jadwal_sholat j ON a.id_jadwal = j.id_jadwal")
+
+		if jurusan != "" && jurusan != "Semua Jurusan" {
+			query = query.Where("s.jurusan = ?", jurusan)
+		}
+
+		err = query.Scan(&rawResults).Error
 
 		type RowKey struct {
 			NIS     string
