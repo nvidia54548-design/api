@@ -330,17 +330,18 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		baseQuery := db.Model(&models.Absensi{}).
 			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis")
 
-		// Apply filters
+		// Apply filters using range comparisons for timestamps to enable index usage
 		if req.Tanggal != "" {
 			logger.Infow("FILTERING BY SINGLE DATE", "received_tanggal_param", req.Tanggal)
-			baseQuery = baseQuery.Where("DATE(absensi.tanggal) = ?", req.Tanggal)
+			// Assuming req.Tanggal is YYYY-MM-DD, compare as range [T 00:00:00, T 23:59:59]
+			baseQuery = baseQuery.Where("absensi.tanggal >= ? AND absensi.tanggal <= ?", req.Tanggal+" 00:00:00", req.Tanggal+" 23:59:59")
 		} else {
 			logger.Infow("NO SINGLE DATE FILTER APPLIED", "received_tanggal_param", req.Tanggal)
 			if req.StartDate != "" {
-				baseQuery = baseQuery.Where("DATE(absensi.tanggal) >= ?", req.StartDate)
+				baseQuery = baseQuery.Where("absensi.tanggal >= ?", req.StartDate+" 00:00:00")
 			}
 			if req.EndDate != "" {
-				baseQuery = baseQuery.Where("DATE(absensi.tanggal) <= ?", req.EndDate)
+				baseQuery = baseQuery.Where("absensi.tanggal <= ?", req.EndDate+" 23:59:59")
 			}
 		}
 		if req.Kelas != "" {
@@ -384,41 +385,51 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		}
 		siswaQuery.Count(&stats.TotalSiswa)
 
-		stats.TotalAbsensi = totalItems
+		// Consolidate status counts into a single efficient query
+		type StatusStats struct {
+			Hadir int64
+			Izin  int64
+			Sakit int64
+			Alpha int64
+		}
+		var statusStats StatusStats
 
-		// Count by status
-		countByStatusQuery := func(status string) int64 {
-			var count int64
-			q := db.Model(&models.Absensi{}).
-				Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis").
-				Where("absensi.status = ?", status)
-			if req.Tanggal != "" {
-				q = q.Where("DATE(absensi.tanggal) = ?", req.Tanggal)
-			} else {
-				if req.StartDate != "" {
-					q = q.Where("DATE(absensi.tanggal) >= ?", req.StartDate)
-				}
-				if req.EndDate != "" {
-					q = q.Where("DATE(absensi.tanggal) <= ?", req.EndDate)
-				}
+		statsQuery := db.Model(&models.Absensi{}).
+			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis").
+			Select("SUM(CASE WHEN absensi.status = 'hadir' THEN 1 ELSE 0 END) as hadir, " +
+				"SUM(CASE WHEN absensi.status = 'izin' THEN 1 ELSE 0 END) as izin, " +
+				"SUM(CASE WHEN absensi.status = 'sakit' THEN 1 ELSE 0 END) as sakit, " +
+				"SUM(CASE WHEN absensi.status = 'alpha' THEN 1 ELSE 0 END) as alpha")
+
+		// Apply the SAME filters as baseQuery
+		if req.Tanggal != "" {
+			statsQuery = statsQuery.Where("absensi.tanggal >= ? AND absensi.tanggal <= ?", req.Tanggal+" 00:00:00", req.Tanggal+" 23:59:59")
+		} else {
+			if req.StartDate != "" {
+				statsQuery = statsQuery.Where("absensi.tanggal >= ?", req.StartDate+" 00:00:00")
 			}
-			if req.Kelas != "" {
-				q = q.Where("siswa.kelas = ?", req.Kelas)
+			if req.EndDate != "" {
+				statsQuery = statsQuery.Where("absensi.tanggal <= ?", req.EndDate+" 23:59:59")
 			}
-			if req.Jurusan != "" {
-				q = q.Where("siswa.jurusan = ?", req.Jurusan)
-			}
-			if req.NIS != "" {
-				q = q.Where("absensi.nis = ?", req.NIS)
-			}
-			q.Count(&count)
-			return count
+		}
+		if req.Kelas != "" {
+			statsQuery = statsQuery.Where("siswa.kelas = ?", req.Kelas)
+		}
+		if req.Jurusan != "" {
+			statsQuery = statsQuery.Where("siswa.jurusan = ?", req.Jurusan)
+		}
+		if req.NIS != "" {
+			statsQuery = statsQuery.Where("absensi.nis = ?", req.NIS)
 		}
 
-		stats.TotalHadir = countByStatusQuery("hadir")
-		stats.TotalIzin = countByStatusQuery("izin")
-		stats.TotalSakit = countByStatusQuery("sakit")
-		stats.TotalAlpha = countByStatusQuery("alpha")
+		if err := statsQuery.Scan(&statusStats).Error; err != nil {
+			logger.Errorw("Failed to fetch status statistics", "error", err.Error())
+		}
+
+		stats.TotalHadir = statusStats.Hadir
+		stats.TotalIzin = statusStats.Izin
+		stats.TotalSakit = statusStats.Sakit
+		stats.TotalAlpha = statusStats.Alpha
 
 		if stats.TotalAbsensi > 0 {
 			stats.PersentaseHadir = float64(stats.TotalHadir) / float64(stats.TotalAbsensi) * 100
@@ -437,13 +448,13 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis")
 
 		if req.Tanggal != "" {
-			dataQuery = dataQuery.Where("DATE(absensi.tanggal) = ?", req.Tanggal)
+			dataQuery = dataQuery.Where("absensi.tanggal >= ? AND absensi.tanggal <= ?", req.Tanggal+" 00:00:00", req.Tanggal+" 23:59:59")
 		} else {
 			if req.StartDate != "" {
-				dataQuery = dataQuery.Where("DATE(absensi.tanggal) >= ?", req.StartDate)
+				dataQuery = dataQuery.Where("absensi.tanggal >= ?", req.StartDate+" 00:00:00")
 			}
 			if req.EndDate != "" {
-				dataQuery = dataQuery.Where("DATE(absensi.tanggal) <= ?", req.EndDate)
+				dataQuery = dataQuery.Where("absensi.tanggal <= ?", req.EndDate+" 23:59:59")
 			}
 		}
 		if req.Kelas != "" {

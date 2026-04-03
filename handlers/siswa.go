@@ -151,8 +151,8 @@ func GetSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Apply search filter (NIS or nama_siswa)
 		if filter.Search != "" {
-			searchTerm := "%" + strings.ToLower(filter.Search) + "%"
-			query = query.Where("LOWER(nis) LIKE ? OR LOWER(nama_siswa) LIKE ?", searchTerm, searchTerm)
+			searchTerm := "%" + filter.Search + "%"
+			query = query.Where("nis LIKE ? OR nama_siswa LIKE ?", searchTerm, searchTerm)
 		}
 
 		// Apply exact filters

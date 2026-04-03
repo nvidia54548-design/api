@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1011,7 +1012,7 @@ func ExportLaporanExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 		row++
 
 		// Write detail table headers
-		detailHeaders := []string{"No", "NIS", "Nama Siswa", "Kelas", "Jurusan", "Tanggal", "Status", "Deskripsi"}
+		detailHeaders := []string{"No", "Nama Siswa", "Kelas", "Jurusan", "Tanggal", "Status", "Deskripsi"}
 		for colIndex, header := range detailHeaders {
 			cellName, err := excelize.CoordinatesToCellName(colIndex+1, row)
 			if err != nil {
@@ -1127,227 +1128,267 @@ func ExportLaporanExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 // @Router /export/attendance-report [get]
 func ExportAttendanceReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		startDate := c.Query("start_date")
-		endDate := c.Query("end_date")
-		jurusan := c.Query("jurusan")
+		var req ExportAbsensiRequest
+		if err := c.ShouldBindQuery(&req); err != nil {
+			logger.Warnw("Invalid export request", "error", err.Error())
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Parameter tidak valid", "error": err.Error()})
+			return
+		}
 
-		if startDate == "" || endDate == "" {
-			logger.Warnw("Export failed: missing mandatory date parameters", "start_date", startDate, "end_date", endDate, "jurusan", jurusan)
+		if req.StartDate == "" || req.EndDate == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"message": "start_date dan end_date wajib diisi"})
 			return
 		}
 
-		// Data structures for aggregation
+		// 1. Generate Dynamic Dates
+		start, _ := time.Parse("2006-01-02", req.StartDate)
+		end, _ := time.Parse("2006-01-02", req.EndDate)
+		var dates []string
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+			dates = append(dates, d.Format("2006-01-02"))
+		}
+
+		// 2. Fetch Students
+        var students []models.Siswa
+        stQuery := db.Model(&models.Siswa{})
+        if req.Jurusan != "" {
+            stQuery = stQuery.Where("jurusan = ?", req.Jurusan)
+        }
+        if req.Kelas != "" {
+            stQuery = stQuery.Where("kelas = ?", req.Kelas)
+        }
+        stQuery.Order("kelas ASC, nama_siswa ASC").Find(&students)
+
+        studentsByClass := make(map[string][]models.Siswa)
+        var classList []string
+        for _, s := range students {
+            if _, exists := studentsByClass[s.Kelas]; !exists {
+                classList = append(classList, s.Kelas)
+            }
+            studentsByClass[s.Kelas] = append(studentsByClass[s.Kelas], s)
+        }
+
+		// 3. Fetch Attendance Data
 		type RawData struct {
 			NIS         string
-			NamaSiswa   string
-			Jurusan     string
 			Tanggal     time.Time
 			JenisSholat string
 			Status      string
 		}
-
 		var rawResults []RawData
-		query := db.Table("siswa s").
-			Select("s.nis, s.nama_siswa, s.jurusan, a.tanggal, j.jenis_sholat, a.status").
-			Joins("LEFT JOIN absensi a ON s.nis = a.nis").
-			Joins("LEFT JOIN jadwal_sholat j ON a.id_jadwal = j.id_jadwal").
-			Where("a.tanggal BETWEEN ? AND ?", startDate, endDate)
+		db.Table("absensi a").
+			Select("a.nis, a.tanggal, j.jenis_sholat, a.status").
+			Joins("JOIN jadwal_sholat j ON a.id_jadwal = j.id_jadwal").
+			Where("a.tanggal BETWEEN ? AND ?", req.StartDate, req.EndDate).
+			Scan(&rawResults)
 
-		if jurusan != "" && jurusan != "Semua Jurusan" {
-			query = query.Where("s.jurusan = ?", jurusan)
-		}
-
-		err := query.Scan(&rawResults).Error
-
-		if err != nil {
-			logger.Errorw("Failed to fetch raw data for aggregated report", "error", err.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal mengambil data laporan"})
-			return
-		}
-
-		type RowKey struct {
-			NIS     string
-			Tanggal string
-		}
-		type ReportRow struct {
-			NIS          string
-			Nama         string
-			Jurusan      string
-			Tanggal      string
-			Dhuha        string
-			DzuhurJumat  string
-			HadirCount   int
-			IzinSakitCnt int
-			AlphaCount   int
-		}
-
-		// Grouping logic
-		rowsMap := make(map[RowKey]*ReportRow)
-		var sortedKeys []RowKey
-
+		// Map to efficient lookup: Map[NIS] -> Map[DateString] -> Map[PrayerType] -> Status
+		attendanceMap := make(map[string]map[string]map[string]string)
 		for _, item := range rawResults {
-			dateStr := item.Tanggal.Format("02-01-2006")
-			key := RowKey{NIS: item.NIS, Tanggal: dateStr}
-
-			if _, exists := rowsMap[key]; !exists {
-				rowsMap[key] = &ReportRow{
-					NIS:         item.NIS,
-					Nama:        item.NamaSiswa,
-					Jurusan:     item.Jurusan,
-					Tanggal:     dateStr,
-					Dhuha:       "-",
-					DzuhurJumat: "-",
-				}
-				sortedKeys = append(sortedKeys, key)
+			dateStr := item.Tanggal.Format("2006-01-02")
+			if attendanceMap[item.NIS] == nil {
+				attendanceMap[item.NIS] = make(map[string]map[string]string)
 			}
-
-			row := rowsMap[key]
-			status := item.Status
-
-			// Map to columns
-			if item.JenisSholat == "Dhuha" {
-				row.Dhuha = status
-			} else if item.JenisSholat == "Dzuhur" || item.JenisSholat == "Jumat" {
-				row.DzuhurJumat = status
+			if attendanceMap[item.NIS][dateStr] == nil {
+				attendanceMap[item.NIS][dateStr] = make(map[string]string)
 			}
-
-			// Aggregate totals
-			switch status {
-			case "HADIR":
-				row.HadirCount++
-			case "IZIN", "SAKIT":
-				row.IzinSakitCnt++
-			case "ALPHA":
-				row.AlphaCount++
-			}
+			attendanceMap[item.NIS][dateStr][item.JenisSholat] = item.Status
 		}
 
-		// Create Excel
+		// 4. Excel Generation
 		f := excelize.NewFile()
-		sheetName := "Data Absensi"
-		f.SetSheetName("Sheet1", sheetName)
 
-		// Styles
+		// Initialize Styles
 		titleStyle, _ := f.NewStyle(&excelize.Style{
-			Font:      &excelize.Font{Bold: true, Size: 14},
-			Alignment: &excelize.Alignment{Horizontal: "center"},
-		})
-		subtitleStyle, _ := f.NewStyle(&excelize.Style{
-			Font:      &excelize.Font{Bold: true, Size: 11},
-			Alignment: &excelize.Alignment{Horizontal: "center"},
+			Font: &excelize.Font{Bold: true, Size: 16}, Alignment: &excelize.Alignment{Horizontal: "center"},
 		})
 		headerStyle, _ := f.NewStyle(&excelize.Style{
 			Font:      &excelize.Font{Bold: true, Color: "FFFFFF"},
-			Fill:      excelize.Fill{Type: "pattern", Color: []string{"2F5597"}, Pattern: 1},
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"4472C4"}, Pattern: 1},
 			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
 		})
-		dataStyle, _ := f.NewStyle(&excelize.Style{
-			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
-			Alignment: &excelize.Alignment{Horizontal: "center"},
+		baseStyle, _ := f.NewStyle(&excelize.Style{
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
+			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}	, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
 		})
-		leftAlignStyle, _ := f.NewStyle(&excelize.Style{
+		dhuhaStyle, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"FFC000"}, Pattern: 1},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
-			Alignment: &excelize.Alignment{Horizontal: "left"},
 		})
-
-		// Status Colors
-		hadirStyle, _ := f.NewStyle(&excelize.Style{
-			Fill:      excelize.Fill{Type: "pattern", Color: []string{"C6EFCE"}, Pattern: 1},
-			Font:      &excelize.Font{Color: "006100"},
+		dhuhurStyle, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"00B0F0"}, Pattern: 1},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
-			Alignment: &excelize.Alignment{Horizontal: "center"},
 		})
-		alphaStyle, _ := f.NewStyle(&excelize.Style{
-			Fill:      excelize.Fill{Type: "pattern", Color: []string{"FFC7CE"}, Pattern: 1},
-			Font:      &excelize.Font{Color: "9C0006"},
+		jumatStyle, _ := f.NewStyle(&excelize.Style{
+			Fill:      excelize.Fill{Type: "pattern", Color: []string{"92D050"}, Pattern: 1},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
-			Alignment: &excelize.Alignment{Horizontal: "center"},
-		})
-		izinStyle, _ := f.NewStyle(&excelize.Style{
-			Fill:      excelize.Fill{Type: "pattern", Color: []string{"FFEB9C"}, Pattern: 1},
-			Font:      &excelize.Font{Color: "9C6500"},
-			Border:    []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}},
-			Alignment: &excelize.Alignment{Horizontal: "center"},
 		})
 
-		// 1. Titles
-		f.SetCellValue(sheetName, "A1", "LAPORAN ABSENSI SHOLAT SISWA - SMK NEGERI 2 SINGOSARI")
-		f.MergeCell(sheetName, "A1", "J1")
-		f.SetCellStyle(sheetName, "A1", "A1", titleStyle)
-
-		subtitle := fmt.Sprintf("Periode: %s s/d %s | Jurusan: %s", startDate, endDate, jurusan)
-		f.SetCellValue(sheetName, "A2", subtitle)
-		f.MergeCell(sheetName, "A2", "J2")
-		f.SetCellStyle(sheetName, "A2", "A2", subtitleStyle)
-
-		// 2. Table Headers
-		headers := []string{"No", "NIS", "Nama Siswa", "Jurusan", "Tanggal", "Dhuha", "Dzuhur/Jumat", "Hadir", "Izin/Sakit", "Alpha"}
-		colWidths := []float64{5, 12, 30, 15, 15, 12, 12, 10, 12, 10}
-		for i, h := range headers {
-			colName, _ := excelize.CoordinatesToCellName(i+1, 4)
-			f.SetCellValue(sheetName, colName, h)
-			f.SetCellStyle(sheetName, colName, colName, headerStyle)
-			f.SetColWidth(sheetName, string('A'+rune(i)), string('A'+rune(i)), colWidths[i])
+		// Helper to convert Status to Symbol
+		getSymbol := func(status string) string {
+			switch status {
+			case "HADIR":
+				return "H"
+			case "IZIN":
+				return "I"
+			case "SAKIT":
+				return "S"
+			case "ALPHA":
+				return "A"
+			default:
+				return "-"
+			}
 		}
 
-		// 3. Data Rows
-		rowIdx := 5
-		for i, key := range sortedKeys {
-			rowData := rowsMap[key]
-
-			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), i+1)
-			f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), rowData.NIS)
-			f.SetCellValue(sheetName, fmt.Sprintf("C%d", rowIdx), rowData.Nama)
-			f.SetCellValue(sheetName, fmt.Sprintf("D%d", rowIdx), rowData.Jurusan)
-			f.SetCellValue(sheetName, fmt.Sprintf("E%d", rowIdx), rowData.Tanggal)
-			f.SetCellValue(sheetName, fmt.Sprintf("F%d", rowIdx), rowData.Dhuha)
-			f.SetCellValue(sheetName, fmt.Sprintf("G%d", rowIdx), rowData.DzuhurJumat)
-			f.SetCellValue(sheetName, fmt.Sprintf("H%d", rowIdx), rowData.HadirCount)
-			f.SetCellValue(sheetName, fmt.Sprintf("I%d", rowIdx), rowData.IzinSakitCnt)
-			f.SetCellValue(sheetName, fmt.Sprintf("J%d", rowIdx), rowData.AlphaCount)
-
-			// Simple Alignment
-			f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("B%d", rowIdx), dataStyle)
-			f.SetCellStyle(sheetName, fmt.Sprintf("C%d", rowIdx), fmt.Sprintf("C%d", rowIdx), leftAlignStyle)
-			f.SetCellStyle(sheetName, fmt.Sprintf("D%d", rowIdx), fmt.Sprintf("E%d", rowIdx), dataStyle)
-			f.SetCellStyle(sheetName, fmt.Sprintf("H%d", rowIdx), fmt.Sprintf("J%d", rowIdx), dataStyle)
-
-			// Conditional Formatting for Dhuha
-			switch rowData.Dhuha {
-			case "HADIR":
-				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), hadirStyle)
-			case "ALPHA":
-				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), alphaStyle)
-			case "IZIN", "SAKIT":
-				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), izinStyle)
-			default:
-				f.SetCellStyle(sheetName, fmt.Sprintf("F%d", rowIdx), fmt.Sprintf("F%d", rowIdx), dataStyle)
+		firstSheet := true
+		for _, className := range classList {
+			sheetName := strings.TrimSpace(className)
+			if firstSheet {
+				f.SetSheetName("Sheet1", sheetName)
+				firstSheet = false
+			} else {
+				f.NewSheet(sheetName)
 			}
 
-			// Conditional Formatting for Dzuhur/Jumat
-			switch rowData.DzuhurJumat {
-			case "HADIR":
-				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), hadirStyle)
-			case "ALPHA":
-				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), alphaStyle)
-			case "IZIN", "SAKIT":
-				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), izinStyle)
-			default:
-				f.SetCellStyle(sheetName, fmt.Sprintf("G%d", rowIdx), fmt.Sprintf("G%d", rowIdx), dataStyle)
+			// Prefix columns: No (1), Nama Siswa (2), Identitas (3), sholat (4)
+			// + dates...
+			// + 6 summary columns
+			lastCol, _ := excelize.ColumnNumberToName(4 + len(dates) + 6) 
+
+			// Header Section (Row 1-2)
+			f.SetCellValue(sheetName, "A1", "LAPORAN ABSENSI SHOLAT SISWA - SMK NEGERI 2 SINGOSARI")
+			f.MergeCell(sheetName, "A1", lastCol+"1")
+			f.SetCellStyle(sheetName, "A1", lastCol+"1", titleStyle)
+
+			infoStr := fmt.Sprintf("Tanggal: %s s/d %s | Kelas: %s", req.StartDate, req.EndDate, className)
+			if req.Jurusan != "" {
+				infoStr += fmt.Sprintf(" | Jurusan: %s", req.Jurusan)
+			}
+			f.SetCellValue(sheetName, "A2", infoStr)
+			f.MergeCell(sheetName, "A2", lastCol+"2")
+			f.SetCellStyle(sheetName, "A2", lastCol+"2", baseStyle)
+
+			// Table Header (Row 4)
+			headers := []string{"No", "Nama Siswa", "Identitas (Kelas/Jur/Part)", "Jenis Sholat"}
+			headers = append(headers, dates...)
+			headers = append(headers, "total dhuha", "total dhuhur", "total jumat", "total hadir", "total izin/sakit", "total alpha")
+
+			for i, h := range headers {
+				col, _ := excelize.ColumnNumberToName(i + 1)
+				f.SetCellValue(sheetName, col+"4", h)
+				f.SetCellStyle(sheetName, col+"4", col+"4", headerStyle)
 			}
 
-			rowIdx++
+			// Column Widths
+			f.SetColWidth(sheetName, "A", "A", 5)  // No
+			f.SetColWidth(sheetName, "B", "B", 35) // Nama Siswa
+			f.SetColWidth(sheetName, "C", "C", 35) // Identitas
+			f.SetColWidth(sheetName, "D", "D", 12) // sholat
+			dateStartCol, _ := excelize.ColumnNumberToName(5)
+			dateEndCol, _ := excelize.ColumnNumberToName(4 + len(dates))
+			f.SetColWidth(sheetName, dateStartCol, dateEndCol, 12)
+			summStartCol, _ := excelize.ColumnNumberToName(5 + len(dates))
+			f.SetColWidth(sheetName, summStartCol, lastCol, 15)
+
+			// Student Rows (Starting from Row 5)
+			currentRow := 5
+			for i, s := range studentsByClass[className] {
+				startRow := currentRow
+				endRow := startRow + 2
+
+				// Vertical Merging
+				f.MergeCell(sheetName, fmt.Sprintf("A%d", startRow), fmt.Sprintf("A%d", endRow))
+				f.MergeCell(sheetName, fmt.Sprintf("B%d", startRow), fmt.Sprintf("B%d", endRow))
+				f.MergeCell(sheetName, fmt.Sprintf("C%d", startRow), fmt.Sprintf("C%d", endRow))
+
+				f.SetCellValue(sheetName, fmt.Sprintf("A%d", startRow), i+1)
+				f.SetCellValue(sheetName, fmt.Sprintf("B%d", startRow), s.NamaSiswa)
+				f.SetCellValue(sheetName, fmt.Sprintf("C%d", startRow), fmt.Sprintf("%s %s %s", s.Kelas, s.Jurusan, s.Part))
+
+				f.SetCellStyle(sheetName, fmt.Sprintf("A%d", startRow), fmt.Sprintf("C%d", endRow), baseStyle)
+
+				// Prayer Rows
+				prayers := []struct {
+					Name  string
+					Style int
+				}{
+					{"Dhuha", dhuhaStyle},
+					{"Dzuhur", dhuhurStyle},
+					{"Jumat", jumatStyle},
+				}
+
+				var grandH, grandIS, grandA int
+
+				for pIdx, p := range prayers {
+					row := startRow + pIdx
+					f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), p.Name)
+					f.SetCellStyle(sheetName, fmt.Sprintf("D%d", row), fmt.Sprintf("D%d", row), p.Style)
+
+					var rowH int
+					// Fill Dates
+					for dIdx, date := range dates {
+						col, _ := excelize.ColumnNumberToName(5 + dIdx)
+						status := ""
+						if attendanceMap[s.NIS] != nil && attendanceMap[s.NIS][date] != nil {
+							status = attendanceMap[s.NIS][date][p.Name]
+						}
+						symbol := getSymbol(status)
+						f.SetCellValue(sheetName, col+fmt.Sprintf("%d", row), symbol)
+						f.SetCellStyle(sheetName, col+fmt.Sprintf("%d", row), col+fmt.Sprintf("%d", row), p.Style)
+
+						switch symbol {
+						case "H":
+							rowH++
+							grandH++
+						case "I", "S":
+							grandIS++
+						case "A":
+							grandA++
+						}
+					}
+
+					// Total Per Prayer Row
+					totalCol, _ := excelize.ColumnNumberToName(5 + len(dates) + pIdx)
+					f.SetCellValue(sheetName, totalCol+fmt.Sprintf("%d", row), rowH)
+					f.SetCellStyle(sheetName, totalCol+fmt.Sprintf("%d", row), totalCol+fmt.Sprintf("%d", row), p.Style)
+				}
+
+				// Grand Summary (Merged Vertically)
+				sumHCol, _ := excelize.ColumnNumberToName(5 + len(dates) + 3)
+				sumISCol, _ := excelize.ColumnNumberToName(5 + len(dates) + 4)
+				sumACol, _ := excelize.ColumnNumberToName(5 + len(dates) + 5)
+
+				f.MergeCell(sheetName, sumHCol+fmt.Sprintf("%d", startRow), sumHCol+fmt.Sprintf("%d", endRow))
+				f.MergeCell(sheetName, sumISCol+fmt.Sprintf("%d", startRow), sumISCol+fmt.Sprintf("%d", endRow))
+				f.MergeCell(sheetName, sumACol+fmt.Sprintf("%d", startRow), sumACol+fmt.Sprintf("%d", endRow))
+
+				f.SetCellValue(sheetName, sumHCol+fmt.Sprintf("%d", startRow), grandH)
+				f.SetCellValue(sheetName, sumISCol+fmt.Sprintf("%d", startRow), grandIS)
+				f.SetCellValue(sheetName, sumACol+fmt.Sprintf("%d", startRow), grandA)
+
+				f.SetCellStyle(sheetName, sumHCol+fmt.Sprintf("%d", startRow), sumACol+fmt.Sprintf("%d", endRow), baseStyle)
+
+				currentRow += 3
+			}
 		}
 
-		// 4. Response
-		fileName := fmt.Sprintf("Laporan_Absensi_%s_%s.xlsx", jurusan, time.Now().Format("Jan_2006"))
-		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
-		f.Write(c.Writer)
+		// 5. Response
+		filename := fmt.Sprintf("Laporan_Absensi_%s_%s.xlsx", req.Jurusan, time.Now().Format("20060102"))
+		c.Header("Content-Type", ExcelContentType)
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+
+		if err := f.Write(c.Writer); err != nil {
+			logger.Errorw("Failed to write excel", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal mengirim file Excel"})
+			return
+		}
 	}
 }
+
 
 // ExportIntegratedReportExcel godoc
 // @Summary Export laporan lengkap (Absensi & Jadwal) ke Excel

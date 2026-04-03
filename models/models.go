@@ -10,6 +10,7 @@ type Siswa struct {
 	JK        string `gorm:"not null" json:"jk"`
 	Jurusan   string `json:"jurusan"`
 	Kelas     string `json:"kelas"`
+	Part      string `json:"part"`
 }
 
 func (Siswa) TableName() string {
