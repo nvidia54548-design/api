@@ -1,0 +1,28 @@
+{
+  "build": {
+    "env": {
+      "GO_BUILD_FLAGS": "-ldflags '-s -w'"
+    }
+  },
+  "functions": {
+    "api/index.go": {
+      "runtime": "vercel-go@latest",
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index.go"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index.go"
+    },
+    {
+      "source": "/metrics",
+      "destination": "/api/index.go"
+    }
+  ]
+}

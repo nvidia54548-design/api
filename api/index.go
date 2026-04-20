@@ -3,16 +3,11 @@ package handler
 import (
 	"context"
 	"fmt"
-	"log" // Added log import
-
-	// Added math/rand import
+	"log"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -20,6 +15,9 @@ import (
 	"absensholat-api/routes"
 	"absensholat-api/utils"
 
+	"os"
+
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -44,36 +42,6 @@ func initLogger() {
 	sugar = logger.Sugar()
 }
 
-func GinMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
-
-		c.Next()
-
-		latency := time.Since(start)
-		if sugar != nil {
-			sugar.Infow("request",
-				"status", c.Writer.Status(),
-				"method", c.Request.Method,
-				"path", path,
-				"query", query,
-				"ip", c.ClientIP(),
-				"latency", latency,
-				"user-agent", c.Request.UserAgent(),
-			)
-		}
-	}
-}
-
-func healthCheck(c *gin.Context) {
-	c.JSON(200, gin.H{
-		"status":  "ok",
-		"message": "API is running on Vercel",
-	})
-}
-
 func initGin() {
 	initLogger()
 
@@ -91,34 +59,12 @@ func initGin() {
 		utils.StartOTPCleanup(5 * time.Minute)
 	}
 
-	// Set Gin to release mode for production
-	gin.SetMode(gin.ReleaseMode)
-
-	// Initialize router
-	ginEngine = gin.New()
-
-	// CORS middleware
-	corsConfig := cors.Config{
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"},
-		AllowHeaders:     []string{"Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"},
-		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
-		AllowCredentials: true,
-		MaxAge:           86400,
+	// Initialize Redis cache (optional)
+	if err := utils.InitCache(sugar); err != nil {
+		if sugar != nil {
+			sugar.Warnf("Redis cache initialization failed: %v. Caching disabled.", err)
+		}
 	}
-
-	// Allow specific origins in production
-	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
-	if allowedOrigins == "" {
-		corsConfig.AllowOrigins = []string{"*"}
-	} else {
-		corsConfig.AllowOrigins = []string{allowedOrigins}
-	}
-
-	ginEngine.Use(cors.New(corsConfig))
-	ginEngine.Use(GinMiddleware(), gin.Recovery())
-
-	// Health check endpoint (before DB, so it works even if DB fails)
-	ginEngine.GET("/health", healthCheck)
 
 	// Connect to database
 	conn := os.Getenv("DATABASE_URL")
@@ -139,8 +85,21 @@ func initGin() {
 		return
 	}
 
+	// Configure connection pool for serverless
+	sqlDB, err := db.DB()
+	if err != nil {
+		initErr = fmt.Errorf("failed to get database connection: %w", err)
+		if sugar != nil {
+			sugar.Error(initErr)
+		}
+		return
+	}
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+
 	if sugar != nil {
-		sugar.Info("Database connected")
+		sugar.Info("Database connected with serverless pool configuration")
 	}
 
 	if err := database.EnsureTablesCreated(db, sugar); err != nil {
@@ -151,13 +110,12 @@ func initGin() {
 		return
 	}
 
-	routes.SetupRoutes(ginEngine, db, sugar)
-
+	// Use SetupEngine for full middleware stack (CORS, gzip, security headers, rate limiting, etc.)
+	ginEngine = routes.SetupEngine(db, sugar, true)
 }
 
 // Handler is the entrypoint for Vercel serverless function
 func Handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Vercel Request Path:", r.URL.Path)
 	once.Do(initGin)
 
 	if initErr != nil {
