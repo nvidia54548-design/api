@@ -6,7 +6,7 @@
   },
   "functions": {
     "api/index.go": {
-      "runtime": "vercel-go@latest",
+      "runtime": "go",
       "maxDuration": 30,
       "memory": 1024
     }
