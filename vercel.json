@@ -6,7 +6,7 @@
   },
   "functions": {
     "api/index.go": {
-      "runtime": "go",
+      "runtime": "go@1.21",
       "maxDuration": 30,
       "memory": 1024
     }
