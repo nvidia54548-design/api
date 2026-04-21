@@ -44,27 +44,48 @@ func initLogger() {
 
 func initGin() {
 	initLogger()
+	startupTimer := utils.NewStartupTimer("serverless", sugar)
+	startupTimer.Mark("logger_initialized")
 
-	// Initialize Firebase for OTP functionality (non-fatal if fails)
-	ctx := context.Background()
-	if err := utils.InitFirebase(ctx); err != nil {
+	if utils.FirebaseLazyInitEnabled() {
 		if sugar != nil {
-			sugar.Warnf("Firebase initialization failed: %v. OTP functionality will be unavailable.", err)
+			sugar.Info("Firebase lazy init enabled: FIREBASE_LAZY_INIT=true")
 		}
 	} else {
-		if sugar != nil {
-			sugar.Info("Firebase initialized successfully")
-		}
-		// Start OTP cleanup every 5 minutes
-		utils.StartOTPCleanup(5 * time.Minute)
-	}
+		go func() {
+			asyncStart := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
 
-	// Initialize Redis cache (optional)
-	if err := utils.InitCache(sugar); err != nil {
-		if sugar != nil {
-			sugar.Warnf("Redis cache initialization failed: %v. Caching disabled.", err)
-		}
+			err := utils.InitFirebase(ctx)
+			utils.LogAsyncStartupPhase(sugar, "serverless", "firebase_init", asyncStart, err)
+			if err != nil {
+				if sugar != nil {
+					sugar.Warnf("Firebase initialization failed: %v. OTP functionality will be unavailable.", err)
+				}
+				return
+			}
+
+			if sugar != nil {
+				sugar.Info("Firebase initialized successfully")
+			}
+
+			utils.EnsureOTPCleanupStarted(5 * time.Minute)
+		}()
 	}
+	startupTimer.Mark("firebase_init_scheduled")
+
+	go func() {
+		asyncStart := time.Now()
+		err := utils.InitCache(sugar)
+		utils.LogAsyncStartupPhase(sugar, "serverless", "redis_init", asyncStart, err)
+		if err != nil {
+			if sugar != nil {
+				sugar.Warnf("Redis cache initialization failed: %v. Caching disabled.", err)
+			}
+		}
+	}()
+	startupTimer.Mark("redis_init_scheduled")
 
 	// Connect to database
 	conn := os.Getenv("DATABASE_URL")
@@ -75,6 +96,7 @@ func initGin() {
 		}
 		return
 	}
+	startupTimer.Mark("database_url_loaded")
 
 	db, err := gorm.Open(postgres.Open(conn), &gorm.Config{})
 	if err != nil {
@@ -84,6 +106,7 @@ func initGin() {
 		}
 		return
 	}
+	startupTimer.Mark("database_connected")
 
 	// Configure connection pool for serverless
 	sqlDB, err := db.DB()
@@ -97,6 +120,7 @@ func initGin() {
 	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetMaxOpenConns(10)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	startupTimer.Mark("database_pool_configured")
 
 	if sugar != nil {
 		sugar.Info("Database connected with serverless pool configuration")
@@ -109,9 +133,11 @@ func initGin() {
 		}
 		return
 	}
+	startupTimer.Mark("schema_ready")
 
 	// Use SetupEngine for full middleware stack (CORS, gzip, security headers, rate limiting, etc.)
 	ginEngine = routes.SetupEngine(db, sugar, true)
+	startupTimer.Mark("router_initialized")
 }
 
 // Handler is the entrypoint for Vercel serverless function

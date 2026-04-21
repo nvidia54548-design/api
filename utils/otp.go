@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,8 +44,72 @@ var (
 	otpStore         *FirebaseOTPStore
 	firebaseInitOnce sync.Once
 	firebaseInitErr  error
+	otpCleanupOnce   sync.Once
 	// firebaseApp      *firebase.App // REMOVED: Variable not used anywhere
 )
+
+func envBool(key string, defaultValue bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return defaultValue
+	}
+
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+func envDurationMS(key string, defaultValue time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return defaultValue
+	}
+
+	ms, err := strconv.Atoi(v)
+	if err != nil || ms <= 0 {
+		return defaultValue
+	}
+
+	return time.Duration(ms) * time.Millisecond
+}
+
+// FirebaseLazyInitEnabled controls whether Firebase initialization is deferred
+// until the OTP store is requested.
+func FirebaseLazyInitEnabled() bool {
+	return envBool("FIREBASE_LAZY_INIT", false)
+}
+
+// EnsureOTPCleanupStarted makes OTP cleanup scheduler idempotent.
+func EnsureOTPCleanupStarted(interval time.Duration) {
+	otpCleanupOnce.Do(func() {
+		StartOTPCleanup(interval)
+	})
+}
+
+func lazyInitFirebaseIfNeeded() {
+	if otpStore != nil || !FirebaseLazyInitEnabled() {
+		return
+	}
+
+	start := time.Now()
+	timeout := envDurationMS("FIREBASE_LAZY_INIT_TIMEOUT_MS", 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	err := InitFirebase(ctx)
+	if err != nil {
+		log.Printf("Lazy Firebase init failed after %dms: %v", time.Since(start).Milliseconds(), err)
+		return
+	}
+
+	EnsureOTPCleanupStarted(5 * time.Minute)
+	log.Printf("Lazy Firebase init completed in %dms", time.Since(start).Milliseconds())
+}
 
 // isURL checks if the given path is a URL
 func isURL(path string) bool {
@@ -161,6 +226,7 @@ func IsFirebaseInitialized() bool {
 
 // GetOTPStore returns the global Firebase OTP store
 func GetOTPStore() *FirebaseOTPStore {
+	lazyInitFirebaseIfNeeded()
 	return otpStore
 }
 

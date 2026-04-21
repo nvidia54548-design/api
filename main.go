@@ -61,11 +61,16 @@ func initLogger() {
 //	@description					Type "Bearer" followed by a space and JWT token.
 
 func main() {
+	startupTimer := utils.NewStartupTimer("main", nil)
+
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found or error loading")
 	}
+	startupTimer.Mark("env_loaded")
 
 	initLogger()
+	startupTimer = utils.NewStartupTimer("main", sugar)
+	startupTimer.Mark("logger_initialized")
 	defer func() {
 		if err := sugar.Sync(); err != nil {
 			log.Printf("Failed to sync logger: %v", err)
@@ -88,32 +93,38 @@ func main() {
 			sugar.Fatalf("Missing required environment variables in production: %s", strings.Join(missing, ", "))
 		}
 	}
+	startupTimer.Mark("env_validated")
 
-	// Initialize Firebase for OTP functionality
-	ctx := context.Background()
-	if err := utils.InitFirebase(ctx); err != nil {
-		sugar.Warnf("Firebase initialization failed: %v. OTP functionality will be unavailable.", err)
+	if utils.FirebaseLazyInitEnabled() {
+		sugar.Info("Firebase lazy init enabled: FIREBASE_LAZY_INIT=true")
 	} else {
-		sugar.Info("Firebase initialized successfully")
-		defer func() {
-			if err := utils.CloseFirebase(); err != nil {
-				log.Printf("Error closing Firebase: %v", err)
-			}
-		}()
-		// Start OTP cleanup every 5 minutes
-		utils.StartOTPCleanup(5 * time.Minute)
-	}
+		go func() {
+			asyncStart := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
 
-	// Initialize Redis cache (optional)
-	if err := utils.InitCache(sugar); err != nil {
-		sugar.Warnf("Redis cache initialization failed: %v. Caching disabled.", err)
-	} else if utils.CacheEnabled() {
-		defer func() {
-			if err := utils.CloseCache(); err != nil {
-				log.Printf("Error closing Cache: %v", err)
+			err := utils.InitFirebase(ctx)
+			utils.LogAsyncStartupPhase(sugar, "main", "firebase_init", asyncStart, err)
+			if err != nil {
+				sugar.Warnf("Firebase initialization failed: %v. OTP functionality will be unavailable.", err)
+				return
 			}
+
+			sugar.Info("Firebase initialized successfully")
+			utils.EnsureOTPCleanupStarted(5 * time.Minute)
 		}()
 	}
+	startupTimer.Mark("firebase_init_scheduled")
+
+	go func() {
+		asyncStart := time.Now()
+		err := utils.InitCache(sugar)
+		utils.LogAsyncStartupPhase(sugar, "main", "redis_init", asyncStart, err)
+		if err != nil {
+			sugar.Warnf("Redis cache initialization failed: %v. Caching disabled.", err)
+		}
+	}()
+	startupTimer.Mark("redis_init_scheduled")
 
 	sugar.Info("Starting up database...")
 
@@ -128,6 +139,7 @@ func main() {
 	if err != nil {
 		sugar.Fatal("Failed to connect to database:", err)
 	}
+	startupTimer.Mark("database_connected")
 
 	// Configure connection pool
 	sqlDB, err := db.DB()
@@ -139,6 +151,7 @@ func main() {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	sugar.Info("Database connected with connection pooling configured")
+	startupTimer.Mark("database_pool_configured")
 
 	// Add database connection pool metrics
 	expvar.Publish("db_idle_conns", expvar.Func(func() interface{} { return sqlDB.Stats().Idle }))
@@ -146,21 +159,26 @@ func main() {
 	expvar.Publish("db_open_conns", expvar.Func(func() interface{} { return sqlDB.Stats().OpenConnections }))
 	expvar.Publish("db_wait_count", expvar.Func(func() interface{} { return sqlDB.Stats().WaitCount }))
 	expvar.Publish("db_wait_duration", expvar.Func(func() interface{} { return sqlDB.Stats().WaitDuration }))
+	startupTimer.Mark("metrics_registered")
 
 	if err := database.EnsureTablesCreated(db, sugar); err != nil {
 		sugar.Fatal("Failed to create tables:", err)
 	}
+	startupTimer.Mark("schema_ready")
 
 	// Start background task to record missed prayers (check every 5 minutes)
 	utils.StartMissedPrayerRecorder(db, sugar, 5*time.Minute)
 	sugar.Info("Missed prayer recorder started - will check for ended prayers every 5 minutes")
+	startupTimer.Mark("missed_prayer_scheduler_started")
 
 	// Start background task to clean up backed-up data (check every hour)
 	handlers.StartBackupCleanupScheduler(db, sugar)
 	sugar.Info("Backup cleanup scheduler started - will check for expired backups every hour")
+	startupTimer.Mark("backup_scheduler_started")
 
 	// Initialize centralized App Engine
 	router := routes.SetupEngine(db, sugar, isProduction)
+	startupTimer.Mark("router_initialized")
 
 	port := os.Getenv("API_PORT")
 	if port == "" {
@@ -183,6 +201,7 @@ func main() {
 			sugar.Fatalf("Failed to start server: %v", err)
 		}
 	}()
+	startupTimer.Mark("listen_started")
 
 	// Graceful shutdown (only for standard environments)
 	quit := make(chan os.Signal, 1)
@@ -204,6 +223,14 @@ func main() {
 		if err := sqlDB.Close(); err != nil {
 			sugar.Errorf("Error closing database connection: %v", err)
 		}
+	}
+
+	if err := utils.CloseFirebase(); err != nil {
+		sugar.Warnf("Error closing Firebase: %v", err)
+	}
+
+	if err := utils.CloseCache(); err != nil {
+		sugar.Warnf("Error closing cache: %v", err)
 	}
 
 	sugar.Info("Server exited gracefully")

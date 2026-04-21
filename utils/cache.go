@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -18,28 +19,54 @@ type CacheClient struct {
 
 var globalCache *CacheClient
 
+func cacheInitTimeout() time.Duration {
+	v := os.Getenv("CACHE_INIT_TIMEOUT_MS")
+	if v == "" {
+		return 800 * time.Millisecond
+	}
+
+	ms, err := strconv.Atoi(v)
+	if err != nil || ms <= 0 {
+		return 800 * time.Millisecond
+	}
+
+	return time.Duration(ms) * time.Millisecond
+}
+
 // InitCache initializes the Redis cache client
 func InitCache(logger *zap.SugaredLogger) error {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
-		logger.Warn("REDIS_URL not set, caching disabled")
+		if logger != nil {
+			logger.Warn("REDIS_URL not set, caching disabled")
+		}
 		return nil
 	}
 
+	initTimeout := cacheInitTimeout()
+
 	opts, err := redis.ParseURL(redisURL)
 	if err != nil {
-		logger.Errorw("Failed to parse Redis URL", "error", err)
+		if logger != nil {
+			logger.Errorw("Failed to parse Redis URL", "error", err)
+		}
 		return err
+	}
+
+	if opts.DialTimeout == 0 {
+		opts.DialTimeout = initTimeout
 	}
 
 	client := redis.NewClient(opts)
 
 	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), initTimeout)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		logger.Errorw("Failed to connect to Redis", "error", err)
+		if logger != nil {
+			logger.Errorw("Failed to connect to Redis", "error", err)
+		}
 		return err
 	}
 
@@ -48,7 +75,9 @@ func InitCache(logger *zap.SugaredLogger) error {
 		logger: logger,
 	}
 
-	logger.Info("Redis cache initialized successfully")
+	if logger != nil {
+		logger.Infow("Redis cache initialized successfully", "init_timeout", initTimeout.String())
+	}
 	return nil
 }
 

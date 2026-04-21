@@ -211,6 +211,15 @@ func VerifyOTP(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		)
 
 		otpStore := utils.GetOTPStore()
+		if otpStore == nil {
+			logger.Errorw("OTP store not initialized",
+				"nis", input.NIS,
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": "Layanan OTP tidak tersedia. Pastikan Firebase sudah dikonfigurasi",
+			})
+			return
+		}
 		valid, err := otpStore.VerifyOTP(input.NIS, input.OTP)
 
 		if err != nil {
@@ -290,6 +299,15 @@ func ResetPassword(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		}
 
 		otpStore := utils.GetOTPStore()
+		if otpStore == nil {
+			logger.Errorw("OTP store not initialized",
+				"nis", input.NIS,
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": "Layanan OTP tidak tersedia. Pastikan Firebase sudah dikonfigurasi",
+			})
+			return
+		}
 
 		// Verify OTP again (in case user skipped verification step)
 		valid, err := otpStore.VerifyOTP(input.NIS, input.OTP)
