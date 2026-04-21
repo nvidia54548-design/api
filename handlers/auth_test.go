@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -34,7 +34,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	// Auto-migrate models
-	err = db.AutoMigrate(&models.Siswa{}, &models.AkunLoginSiswa{}, &models.UserStaff{}, &models.Admin{}, &models.Guru{})
+	err = db.AutoMigrate(&models.Siswa{}, &models.AkunLoginSiswa{}, &models.UserStaff{}, &models.Admin{}, &models.Guru{}, &models.RefreshToken{})
 	if err != nil {
 		t.Fatalf("Failed to migrate test database: %v", err)
 	}
@@ -371,6 +371,7 @@ func TestLogin_Success_Staff(t *testing.T) {
 
 	body := jsonBody(LoginRequest{
 		Identifier: "admin001",
+		Password:   "AdminPass123!",
 	})
 
 	req, err := http.NewRequest("POST", "/login", body)

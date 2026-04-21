@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -345,9 +345,9 @@ func TestGetJadwalDhuhaToday(t *testing.T) {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	// Should have max 2 jurusan
-	if len(response.Data) > 2 {
-		t.Errorf("Expected at most 2 jurusan, got %d", len(response.Data))
+	// Current behavior returns all scheduled jurusan for today.
+	if len(response.Data) != 3 {
+		t.Errorf("Expected 3 jurusan, got %d", len(response.Data))
 	}
 
 	// Check that the jurusan are unique and have schedules

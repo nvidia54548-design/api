@@ -470,8 +470,8 @@ func Me(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")
 		roleStr, ok := role.(string)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "Format role tidak valid"})
+		if !ok || strings.TrimSpace(roleStr) == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"message": "User not authenticated"})
 			return
 		}
 
