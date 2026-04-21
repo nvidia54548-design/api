@@ -96,6 +96,16 @@ func setupAPIV2Routes(api *gin.RouterGroup, db *gorm.DB, logger *zap.SugaredLogg
 		students.POST("/:nis/attendances", middleware.AuthMiddleware("admin", "wali_kelas"), handlers.CreateAbsensi(db, logger))
 	}
 
+	// Admin student control panel
+	studentControl := api.Group("/admin/student-control")
+	studentControl.Use(middleware.AuthMiddleware("admin"))
+	{
+		studentControl.GET("/overview", handlers.AdminStudentControlOverview(db, logger))
+		studentControl.GET("/transitions", handlers.AdminStudentTransitions(db, logger))
+		studentControl.POST("/bulk-progression", handlers.AdminBulkStudentControl(db, logger))
+		studentControl.POST("/annual-rollover", handlers.AdminAnnualRollover(db, logger))
+	}
+
 	// Prayer schedule resources
 	prayerSchedules := api.Group("/prayer-schedules")
 	{

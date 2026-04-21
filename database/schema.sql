@@ -11,7 +11,29 @@ CREATE TABLE siswa (
     nama_siswa VARCHAR(255) NOT NULL,
     jk VARCHAR(10) NOT NULL,
     jurusan VARCHAR(100),
-    kelas VARCHAR(50)
+    kelas VARCHAR(50),
+    academic_year VARCHAR(9) DEFAULT '',
+    current_semester SMALLINT DEFAULT 1,
+    class_status VARCHAR(30) DEFAULT 'active',
+    last_promotion_at TIMESTAMP NULL
+);
+
+CREATE TABLE student_class_transitions (
+    id SERIAL PRIMARY KEY,
+    nis VARCHAR(20) NOT NULL,
+    action VARCHAR(30) NOT NULL,
+    from_class VARCHAR(50),
+    to_class VARCHAR(50),
+    from_academic_year VARCHAR(9),
+    to_academic_year VARCHAR(9),
+    from_semester SMALLINT,
+    to_semester SMALLINT,
+    from_status VARCHAR(30),
+    to_status VARCHAR(30),
+    decided_by VARCHAR(255),
+    note TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (nis) REFERENCES siswa(nis) ON DELETE CASCADE
 );
 
 CREATE TABLE admin (
@@ -71,6 +93,11 @@ CREATE TABLE absensi (
 CREATE INDEX idx_absensi_nis ON absensi(nis);
 CREATE INDEX idx_absensi_id_jadwal ON absensi(id_jadwal);
 CREATE INDEX idx_absensi_tanggal ON absensi(tanggal);
+CREATE INDEX idx_siswa_kelas ON siswa(kelas);
+CREATE INDEX idx_siswa_academic_year ON siswa(academic_year);
+CREATE INDEX idx_siswa_class_status ON siswa(class_status);
+CREATE INDEX idx_student_class_transitions_nis ON student_class_transitions(nis);
+CREATE INDEX idx_student_class_transitions_created_at ON student_class_transitions(created_at);
 CREATE INDEX idx_jadwal_sholat_hari ON jadwal_sholat(hari);
 CREATE INDEX idx_jadwal_sholat_jenis ON jadwal_sholat(jenis_sholat);
 CREATE INDEX idx_sesi_sholat_tanggal ON sesi_sholat(tanggal);

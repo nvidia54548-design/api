@@ -5,12 +5,16 @@ import (
 )
 
 type Siswa struct {
-	NIS       string `gorm:"primaryKey" json:"nis"`
-	NamaSiswa string `gorm:"not null" json:"nama_siswa"`
-	JK        string `gorm:"not null" json:"jk"`
-	Jurusan   string `json:"jurusan"`
-	Kelas     string `json:"kelas"`
-	Part      string `json:"part"`
+	NIS              string     `gorm:"primaryKey" json:"nis"`
+	NamaSiswa        string     `gorm:"not null" json:"nama_siswa"`
+	JK               string     `gorm:"not null" json:"jk"`
+	Jurusan          string     `json:"jurusan"`
+	Kelas            string     `json:"kelas"`
+	Part             string     `json:"part"`
+	AcademicYear     string     `gorm:"column:academic_year" json:"academic_year"`
+	CurrentSemester  int        `gorm:"column:current_semester" json:"current_semester"`
+	ClassStatus      string     `gorm:"column:class_status" json:"class_status"`
+	LastPromotionAt  *time.Time `gorm:"column:last_promotion_at" json:"last_promotion_at,omitempty"`
 }
 
 func (Siswa) TableName() string {
