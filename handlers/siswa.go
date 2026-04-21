@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -76,6 +77,27 @@ type SiswaDeleteResponse struct {
 type SiswaErrorResponse struct {
 	Message string      `json:"message"`
 	Error   interface{} `json:"error,omitempty"`
+}
+
+func extractStudentNIS(c *gin.Context) string {
+	if nis := strings.TrimSpace(c.Param("nis")); nis != "" {
+		return nis
+	}
+
+	fullPath := strings.Trim(c.Request.URL.Path, "/")
+	parts := strings.Split(fullPath, "/")
+	for i := 0; i < len(parts); i++ {
+		if parts[i] == "siswa" || parts[i] == "students" {
+			if i+1 < len(parts) {
+				candidate := strings.TrimSpace(parts[i+1])
+				if candidate != "" {
+					return candidate
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 // GetSiswa godoc
@@ -237,9 +259,7 @@ func GetSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 // @Router /siswa/{nis} [get]
 func GetSiswaByID(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Extract NIS from the full URL path: /api/siswa/{nis}
-		fullPath := c.Request.URL.Path
-		nis := strings.TrimPrefix(fullPath, "/api/siswa/")
+		nis := extractStudentNIS(c)
 
 		if nis == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -343,9 +363,7 @@ func CreateSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 // @Router /siswa/{nis} [put]
 func UpdateSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Extract NIS from the full URL path: /api/siswa/{nis}
-		fullPath := c.Request.URL.Path
-		nis := strings.TrimPrefix(fullPath, "/api/siswa/")
+		nis := extractStudentNIS(c)
 
 		if nis == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -414,9 +432,7 @@ func UpdateSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 // @Router /siswa/{nis} [delete]
 func DeleteSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Extract NIS from the full URL path: /api/siswa/{nis}
-		fullPath := c.Request.URL.Path
-		nis := strings.TrimPrefix(fullPath, "/api/siswa/")
+		nis := extractStudentNIS(c)
 
 		if nis == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -507,8 +523,6 @@ func HandleSiswaPath(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 // @Router /siswa/{nis}/absensi [post]
 func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Extract NIS from the full URL path
-		// Path format: /api/siswa/{nis}/absensi
 		fullPath := c.Request.URL.Path
 
 		logger.Infow("CreateAbsensi called",
@@ -516,10 +530,17 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			"raw_path_param", c.Param("path"),
 		)
 
-		// Remove /api/siswa/ prefix and /absensi suffix
-		nis := fullPath
-		nis = strings.TrimPrefix(nis, "/api/siswa/")
-		nis = strings.TrimSuffix(nis, "/absensi")
+		nis := extractStudentNIS(c)
+		if nis == "" {
+			cleanPath := strings.Trim(fullPath, "/")
+			base := path.Base(cleanPath)
+			if base == "absensi" || base == "attendances" {
+				segments := strings.Split(cleanPath, "/")
+				if len(segments) >= 2 {
+					nis = segments[len(segments)-2]
+				}
+			}
+		}
 
 		logger.Infow("NIS extracted", "nis", nis)
 
