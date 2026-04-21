@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -306,13 +305,24 @@ func Login(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				return
 			}
 
+			refreshClaims, err := utils.ValidateToken(refreshToken)
+			if err != nil || refreshClaims.ExpiresAt == nil {
+				logger.Errorw("Failed to read refresh token expiration", "error", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
+				return
+			}
+
 			// Store/Update Refresh Token in DB
-			db.Create(&models.RefreshToken{
+			if err := db.Create(&models.RefreshToken{
 				UserID:    studentAccount.NIS,
 				Token:     refreshToken,
 				Role:      "siswa",
-				ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
-			})
+				ExpiresAt: refreshClaims.ExpiresAt.Time,
+			}).Error; err != nil {
+				logger.Errorw("Failed to store refresh token", "error", err.Error())
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
+				return
+			}
 
 			logger.Infow("Siswa login successful", "nis", loginID)
 
@@ -403,13 +413,24 @@ func Login(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			return
 		}
 
+		refreshClaims, err := utils.ValidateToken(refreshToken)
+		if err != nil || refreshClaims.ExpiresAt == nil {
+			logger.Errorw("Failed to read refresh token expiration", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
+			return
+		}
+
 		// Store/Update Refresh Token
-		db.Create(&models.RefreshToken{
+		if err := db.Create(&models.RefreshToken{
 			UserID:    staffAccount.Username,
 			Token:     refreshToken,
 			Role:      staffAccount.Role,
-			ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
-		})
+			ExpiresAt: refreshClaims.ExpiresAt.Time,
+		}).Error; err != nil {
+			logger.Errorw("Failed to store refresh token", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
+			return
+		}
 
 		loginMethod := "username"
 		if !loginByUsername {
@@ -584,12 +605,44 @@ func RefreshToken(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			return
 		}
 
-		// Validate refresh token existence and expiry in DB
+		// Validate JWT signature + expiry from token claims (source of truth for expiration)
+		refreshClaims, tokenErr := utils.ValidateToken(req.RefreshToken)
+		if tokenErr != nil {
+			logger.Warnw("Invalid or expired refresh token (JWT validation failed)",
+				"error", tokenErr.Error(),
+			)
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.",
+				"code":    "REFRESH_TOKEN_INVALID",
+			})
+			return
+		}
+
+		// Validate token existence in DB (for revocation/logout checks)
 		var storedToken models.RefreshToken
-		if err := db.First(&storedToken, "token = ? AND expires_at > ?", req.RefreshToken, time.Now()).Error; err != nil {
-			logger.Warnw("Invalid or expired refresh token",
+		if err := db.First(&storedToken, "token = ?", req.RefreshToken).Error; err != nil {
+			logger.Warnw("Refresh token not found in DB",
 				"token", req.RefreshToken,
 				"error", err.Error(),
+			)
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.",
+				"code":    "REFRESH_TOKEN_INVALID",
+			})
+			return
+		}
+
+		// Ensure DB record matches token claims to prevent metadata mismatch
+		tokenUserID := refreshClaims.Username
+		if tokenUserID == "" {
+			tokenUserID = refreshClaims.NIS
+		}
+		if tokenUserID == "" || refreshClaims.Role == "" || storedToken.UserID != tokenUserID || storedToken.Role != refreshClaims.Role {
+			logger.Warnw("Refresh token claims mismatch with DB record",
+				"db_user_id", storedToken.UserID,
+				"db_role", storedToken.Role,
+				"token_user_id", tokenUserID,
+				"token_role", refreshClaims.Role,
 			)
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.",
