@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"absensholat-api/docs"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
@@ -125,7 +126,10 @@ func SetupEngine(db *gorm.DB, logger *zap.SugaredLogger, isProduction bool) *gin
 	if !isProduction {
 		// Only wrap DefaultServeMux for pprof
 		router.GET("/debug/pprof/*profile", gin.WrapH(http.DefaultServeMux))
+		router.GET("/openapi.json", docs.OpenAPIJSONHandler(router, isProduction))
+		router.GET("/docs", docs.ScalarDocsHandler("Absensholat API Reference (Development)", "/openapi.json"))
 		if logger != nil {
+			logger.Info("Scalar API docs enabled at /docs")
 			logger.Info("pprof profiling enabled at /debug/pprof/")
 		}
 	}

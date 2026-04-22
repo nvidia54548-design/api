@@ -92,6 +92,13 @@ absensisholat-api-agent
 
 ## 5. API Documentation
 
+### Scalar API Reference (Development)
+- Scalar docs are enabled automatically when `ENVIRONMENT` is not `production`.
+- Start the API locally, then open:
+    - `http://localhost:8080/docs` for the Scalar UI.
+    - `http://localhost:8080/openapi.json` for the generated OpenAPI document.
+- The OpenAPI spec is generated from all registered Gin routes (`/api/v1`, `/api/v2`, and legacy `/api`) so route coverage stays in sync during development.
+
 ### Authentication Endpoints
 #### `POST /api/v1/siswa/login`
 - **Body**: `{"email": "...", "password": "..."}`

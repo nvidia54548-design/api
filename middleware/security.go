@@ -65,8 +65,9 @@ func SecurityHeaders() gin.HandlerFunc {
 		// Control referrer information
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
-		// Content Security Policy for API responses
-		c.Header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		// Content Security Policy
+		// Keep API responses locked down by default, but allow Scalar assets on /docs.
+		c.Header("Content-Security-Policy", contentSecurityPolicy(c.Request.URL.Path))
 
 		// Prevent caching of sensitive data
 		if isSensitivePath(c.Request.URL.Path) {
@@ -77,6 +78,24 @@ func SecurityHeaders() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func contentSecurityPolicy(path string) string {
+	if strings.HasPrefix(path, "/docs") {
+		return strings.Join([]string{
+			"default-src 'self'",
+			"script-src 'self' https://cdn.jsdelivr.net",
+			"style-src 'self' 'unsafe-inline'",
+			"img-src 'self' data: https:",
+			"font-src 'self' data: https:",
+			"connect-src 'self' https://api.scalar.com https://cdn.jsdelivr.net",
+			"object-src 'none'",
+			"base-uri 'none'",
+			"frame-ancestors 'none'",
+		}, "; ")
+	}
+
+	return "default-src 'none'; frame-ancestors 'none'"
 }
 
 // isSensitivePath checks if the path contains sensitive data
