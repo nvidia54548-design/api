@@ -320,7 +320,7 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Check if already absent today for this jadwal
 		var existingAbsensi models.Absensi
-		err = db.Where("nis = ? AND id_jadwal = ? AND DATE(tanggal) = ?", nisStr, idJadwal, today).
+		err = db.Where("id_siswa = ? AND id_jadwal = ? AND DATE(tanggal) = ?", siswa.IDSiswa, idJadwal, today).
 			First(&existingAbsensi).Error
 
 		if err == nil {
@@ -348,6 +348,7 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			return
 		}
 		absensi := models.Absensi{
+			IDSiswa:   siswa.IDSiswa,
 			NIS:       nisStr,
 			IDJadwal:  idJadwal,
 			Tanggal:   tanggal,

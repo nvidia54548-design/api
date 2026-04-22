@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,6 +117,44 @@ func getActor(c *gin.Context) string {
 	return "admin"
 }
 
+func resolveClassID(tx *gorm.DB, classLabel string) (*int, error) {
+	label := strings.TrimSpace(classLabel)
+	if label == "" {
+		return nil, nil
+	}
+	if asID, err := strconv.Atoi(label); err == nil {
+		return &asID, nil
+	}
+	var id int
+	err := tx.Table("kelas").
+		Select("id_kelas").
+		Where("CONCAT(CAST(tingkatan AS TEXT), ' ', jurusan, ' ', part) = ?", label).
+		Scan(&id).Error
+	if err != nil {
+		return nil, err
+	}
+	if id == 0 {
+		return nil, fmt.Errorf("kelas tujuan tidak ditemukan: %s", label)
+	}
+	return &id, nil
+}
+
+func resolveActorStaffID(tx *gorm.DB, actor string) *int {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return nil
+	}
+	var id int
+	if err := tx.Table("staff").Select("id_staff").Where("nip = ?", actor).Scan(&id).Error; err == nil && id > 0 {
+		return &id
+	}
+	id = 0
+	if err := tx.Table("staff").Select("id_staff").Where("nama = ?", actor).Scan(&id).Error; err == nil && id > 0 {
+		return &id
+	}
+	return nil
+}
+
 func applyStudentTransition(tx *gorm.DB, student models.Siswa, input studentTransitionInput) error {
 	updateData := map[string]interface{}{
 		"class_status": input.TargetStatus,
@@ -128,14 +167,37 @@ func applyStudentTransition(tx *gorm.DB, student models.Siswa, input studentTran
 		updateData["current_semester"] = *input.TargetSemester
 	}
 
-	targetClass := student.Kelas
+	var fromClassValue interface{} = student.IDKelas
+	if student.IDKelas == 0 && strings.TrimSpace(student.Kelas) != "" {
+		fromClassValue = strings.TrimSpace(student.Kelas)
+	}
+	var toClassValue interface{}
+	legacyClassMode := false
 	switch input.Action {
 	case ActionPromote, ActionDemote, ActionSetClass:
-		targetClass = strings.TrimSpace(input.TargetClass)
-		updateData["kelas"] = targetClass
+		resolvedClassID, err := resolveClassID(tx, input.TargetClass)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "no such table") || strings.Contains(strings.ToLower(err.Error()), "does not exist") {
+				legacyClassMode = true
+				targetClass := strings.TrimSpace(input.TargetClass)
+				if targetClass == "" {
+					return fmt.Errorf("target_class wajib untuk action %s", input.Action)
+				}
+				updateData["kelas"] = targetClass
+				toClassValue = targetClass
+			} else {
+				return err
+			}
+		}
+		if !legacyClassMode && resolvedClassID == nil {
+			return fmt.Errorf("target_class wajib untuk action %s", input.Action)
+		}
+		if !legacyClassMode {
+			updateData["id_kelas"] = *resolvedClassID
+			toClassValue = *resolvedClassID
+		}
 	case ActionSetNoClass, ActionMarkDropout:
-		targetClass = ""
-		updateData["kelas"] = ""
+		toClassValue = nil
 	}
 
 	if input.Action == ActionPromote {
@@ -160,21 +222,21 @@ func applyStudentTransition(tx *gorm.DB, student models.Siswa, input studentTran
 
 	if err := tx.Exec(`
 		INSERT INTO student_class_transitions
-		(nis, action, from_class, to_class, from_academic_year, to_academic_year,
+		(id_siswa, action, from_class, to_class, from_academic_year, to_academic_year,
 		 from_semester, to_semester, from_status, to_status, decided_by, note)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		student.NIS,
+		student.IDSiswa,
 		string(input.Action),
-		student.Kelas,
-		targetClass,
+		fromClassValue,
+		toClassValue,
 		student.AcademicYear,
 		input.TargetAcademicYr,
 		fromSemester,
 		toSemester,
 		fromStatus,
 		input.TargetStatus,
-		input.Actor,
+		resolveActorStaffID(tx, input.Actor),
 		input.Note,
 	).Error; err != nil {
 		return err

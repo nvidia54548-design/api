@@ -121,10 +121,11 @@ func RecordMissedPrayers(db *gorm.DB, logger *zap.SugaredLogger) error {
 				key := fmt.Sprintf("%s-%d", student.NIS, prayer.IDJadwal)
 				if !existingMap[key] {
 					absensi := models.Absensi{
+						IDSiswa:   student.IDSiswa,
 						NIS:       student.NIS,
 						IDJadwal:  prayer.IDJadwal,
 						Tanggal:   tanggal,
-						Status:    "ALPHA",
+						Status:    "alpha",
 						Deskripsi: fmt.Sprintf("Absensi otomatis (%s) - tidak hadir", prayer.JenisSholat),
 					}
 					missingRecords = append(missingRecords, absensi)

@@ -163,9 +163,8 @@ func GetSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			if roleStr == "wali_kelas" {
 				nip, _ := c.Get("nip")
 				if nip != nil {
-					var guru models.Guru
-					if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
-						query = query.Where("kelas = ?", guru.KelasWali)
+					if info, err := resolveWaliKelasInfo(db, nip.(string)); err == nil {
+						query = query.Where("id_kelas = ?", info.IDKelas)
 					}
 				}
 			}
@@ -629,22 +628,23 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			nip, _ := c.Get("nip")
 			userNip := nip.(string)
 
-			var guru models.Guru
-			if err := db.Where("nip = ?", userNip).First(&guru).Error; err != nil {
+			info, err := resolveWaliKelasInfo(db, userNip)
+			if err != nil {
 				logger.Errorw("Failed to fetch guru info for wali_kelas", "nip", userNip, "error", err.Error())
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal memverifikasi data wali kelas"})
 				return
 			}
 
-			if guru.KelasWali != siswa.Kelas {
+			if info.IDKelas != siswa.IDKelas {
+				allowed := waliKelasLabel(info)
 				logger.Warnw("Wali kelas attempted to edit student outside their class",
 					"guru_nip", userNip,
-					"guru_kelas", guru.KelasWali,
+					"guru_kelas", allowed,
 					"siswa_nis", nis,
-					"siswa_kelas", siswa.Kelas,
+					"siswa_kelas", siswa.IDKelas,
 				)
 				c.JSON(http.StatusForbidden, gin.H{
-					"message": "Anda hanya diperbolehkan mengelola absensi untuk kelas " + guru.KelasWali,
+					"message": "Anda hanya diperbolehkan mengelola absensi untuk kelas " + allowed,
 				})
 				return
 			}
@@ -653,7 +653,7 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		// Check if an absensi record already exists for this day/jadwal
 		var absensi models.Absensi
 		var existingAbsensi models.Absensi
-		err = db.Where("nis = ? AND id_jadwal = ? AND tanggal = ?", nis, req.IDJadwal, tanggal).First(&existingAbsensi).Error
+		err = db.Where("id_siswa = ? AND id_jadwal = ? AND tanggal = ?", siswa.IDSiswa, req.IDJadwal, tanggal).First(&existingAbsensi).Error
 
 		if err == nil {
 			// Record exists. Update it if the new status is izin/sakit (or any valid status override)
@@ -670,6 +670,7 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		} else if err == gorm.ErrRecordNotFound {
 			// Record doesn't exist, create new one
 			absensi = models.Absensi{
+				IDSiswa:   siswa.IDSiswa,
 				NIS:       nis,
 				IDJadwal:  req.IDJadwal,
 				Tanggal:   tanggal,

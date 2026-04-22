@@ -316,10 +316,8 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			if roleStr == "wali_kelas" {
 				nip, _ := c.Get("nip")
 				if nip != nil {
-					var guru models.Guru
-					if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
-						// Force the class filter to be the teacher's class
-						req.Kelas = guru.KelasWali
+					if info, err := resolveWaliKelasInfo(db, nip.(string)); err == nil {
+						req.Kelas = waliKelasLabel(info)
 						logger.Infow("Wali Kelas class filter enforced", "class", req.Kelas)
 					}
 				}
@@ -328,7 +326,8 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Build base query
 		baseQuery := db.Model(&models.Absensi{}).
-			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis")
+			Joins("LEFT JOIN siswa ON absensi.id_siswa = siswa.id_siswa").
+			Joins("LEFT JOIN kelas ON siswa.id_kelas = kelas.id_kelas")
 
 		// Apply filters using range comparisons for timestamps to enable index usage
 		if req.Tanggal != "" {
@@ -345,13 +344,13 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			}
 		}
 		if req.Kelas != "" {
-			baseQuery = baseQuery.Where("siswa.kelas = ?", req.Kelas)
+			baseQuery = baseQuery.Where("siswa.kelas = ? OR CONCAT(CAST(kelas.tingkatan AS TEXT), kelas.part) = ?", req.Kelas, req.Kelas)
 		}
 		if req.Jurusan != "" {
-			baseQuery = baseQuery.Where("siswa.jurusan = ?", req.Jurusan)
+			baseQuery = baseQuery.Where("siswa.jurusan = ? OR kelas.jurusan = ?", req.Jurusan, req.Jurusan)
 		}
 		if req.NIS != "" {
-			baseQuery = baseQuery.Where("absensi.nis = ?", req.NIS)
+			baseQuery = baseQuery.Where("siswa.nis = ?", req.NIS)
 		}
 		if req.Status != "" {
 			baseQuery = baseQuery.Where("absensi.status = ?", req.Status)
@@ -373,12 +372,12 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		var stats LaporanStatistik
 
 		// Get total siswa based on filters
-		siswaQuery := db.Model(&models.Siswa{})
+		siswaQuery := db.Model(&models.Siswa{}).Joins("LEFT JOIN kelas ON siswa.id_kelas = kelas.id_kelas")
 		if req.Kelas != "" {
-			siswaQuery = siswaQuery.Where("kelas = ?", req.Kelas)
+			siswaQuery = siswaQuery.Where("siswa.kelas = ? OR CONCAT(CAST(kelas.tingkatan AS TEXT), kelas.part) = ?", req.Kelas, req.Kelas)
 		}
 		if req.Jurusan != "" {
-			siswaQuery = siswaQuery.Where("jurusan = ?", req.Jurusan)
+			siswaQuery = siswaQuery.Where("siswa.jurusan = ? OR kelas.jurusan = ?", req.Jurusan, req.Jurusan)
 		}
 		if req.NIS != "" {
 			siswaQuery = siswaQuery.Where("nis = ?", req.NIS)
@@ -395,7 +394,8 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		var statusStats StatusStats
 
 		statsQuery := db.Model(&models.Absensi{}).
-			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis").
+			Joins("LEFT JOIN siswa ON absensi.id_siswa = siswa.id_siswa").
+			Joins("LEFT JOIN kelas ON siswa.id_kelas = kelas.id_kelas").
 			Select("SUM(CASE WHEN absensi.status = 'hadir' THEN 1 ELSE 0 END) as hadir, " +
 				"SUM(CASE WHEN absensi.status = 'izin' THEN 1 ELSE 0 END) as izin, " +
 				"SUM(CASE WHEN absensi.status = 'sakit' THEN 1 ELSE 0 END) as sakit, " +
@@ -413,13 +413,13 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			}
 		}
 		if req.Kelas != "" {
-			statsQuery = statsQuery.Where("siswa.kelas = ?", req.Kelas)
+			statsQuery = statsQuery.Where("siswa.kelas = ? OR CONCAT(CAST(kelas.tingkatan AS TEXT), kelas.part) = ?", req.Kelas, req.Kelas)
 		}
 		if req.Jurusan != "" {
-			statsQuery = statsQuery.Where("siswa.jurusan = ?", req.Jurusan)
+			statsQuery = statsQuery.Where("siswa.jurusan = ? OR kelas.jurusan = ?", req.Jurusan, req.Jurusan)
 		}
 		if req.NIS != "" {
-			statsQuery = statsQuery.Where("absensi.nis = ?", req.NIS)
+			statsQuery = statsQuery.Where("siswa.nis = ?", req.NIS)
 		}
 
 		if err := statsQuery.Scan(&statusStats).Error; err != nil {
@@ -445,7 +445,8 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		dataQuery := db.Model(&models.Absensi{}).
 			Preload("Siswa").
-			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis")
+			Joins("LEFT JOIN siswa ON absensi.id_siswa = siswa.id_siswa").
+			Joins("LEFT JOIN kelas ON siswa.id_kelas = kelas.id_kelas")
 
 		if req.Tanggal != "" {
 			dataQuery = dataQuery.Where("absensi.tanggal >= ? AND absensi.tanggal <= ?", req.Tanggal+" 00:00:00", req.Tanggal+" 23:59:59")
@@ -458,20 +459,20 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			}
 		}
 		if req.Kelas != "" {
-			dataQuery = dataQuery.Where("siswa.kelas = ?", req.Kelas)
+			dataQuery = dataQuery.Where("siswa.kelas = ? OR CONCAT(CAST(kelas.tingkatan AS TEXT), kelas.part) = ?", req.Kelas, req.Kelas)
 		}
 		if req.Jurusan != "" {
-			dataQuery = dataQuery.Where("siswa.jurusan = ?", req.Jurusan)
+			dataQuery = dataQuery.Where("siswa.jurusan = ? OR kelas.jurusan = ?", req.Jurusan, req.Jurusan)
 		}
 		if req.NIS != "" {
-			dataQuery = dataQuery.Where("absensi.nis = ?", req.NIS)
+			dataQuery = dataQuery.Where("siswa.nis = ?", req.NIS)
 		}
 		if req.Status != "" {
 			dataQuery = dataQuery.Where("absensi.status = ?", req.Status)
 		}
 
 		if err := dataQuery.
-			Order("absensi.tanggal DESC, siswa.kelas, siswa.nis").
+			Order("absensi.tanggal DESC, kelas.tingkatan, kelas.part, siswa.nis").
 			Offset(offset).
 			Limit(req.Limit).
 			Find(&absensiList).Error; err != nil {

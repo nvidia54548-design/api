@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"absensholat-api/models"
 	"absensholat-api/utils"
 )
 
@@ -60,9 +59,8 @@ func GetStatistics(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			if roleStr == "wali_kelas" {
 				nip, _ := c.Get("nip")
 				if nip != nil {
-					var guru models.Guru
-					if err := db.Where("nip = ?", nip.(string)).First(&guru).Error; err == nil {
-						kelasFilter = guru.KelasWali
+					if info, err := resolveWaliKelasInfo(db, nip.(string)); err == nil {
+						kelasFilter = waliKelasLabel(info)
 						cacheKey += ":" + kelasFilter
 					}
 				}
@@ -111,26 +109,26 @@ func computeStatistics(db *gorm.DB, logger *zap.SugaredLogger, kelas string) (St
 		// Filtered by class for Wali Kelas
 		query = `
 			SELECT 
-				(SELECT COUNT(*) FROM siswa WHERE kelas = ?) as total_siswa,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ?) as today_total,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'hadir') as today_hadir,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'izin') as today_izin,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'sakit') as today_sakit,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) NOT IN ('hadir')) as today_tidak_hadir,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) IN ('alpha','alpa')) as today_alpha,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ?) as all_time_total,
-				(SELECT COUNT(*) FROM absensi as a JOIN siswa as s ON a.nis = s.nis WHERE s.kelas = ? AND LOWER(TRIM(a.status)) = 'hadir') as all_time_hadir
+				(SELECT COUNT(*) FROM siswa s JOIN kelas k ON s.id_kelas = k.id_kelas WHERE s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) as total_siswa,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ?) as today_total,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'hadir') as today_hadir,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'izin') as today_izin,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'sakit') as today_sakit,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) NOT IN ('hadir')) as today_tidak_hadir,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) IN ('alpha','alpa')) as today_alpha,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?)) as all_time_total,
+				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND LOWER(TRIM(a.status)) = 'hadir') as all_time_hadir
 		`
 		args = []interface{}{
-			kelas,
-			kelas, today,
-			kelas, today,
-			kelas, today,
-			kelas, today,
-			kelas, today,
-			kelas, today,
-			kelas,
-			kelas,
+			kelas, kelas,
+			kelas, kelas, today,
+			kelas, kelas, today,
+			kelas, kelas, today,
+			kelas, kelas, today,
+			kelas, kelas, today,
+			kelas, kelas, today,
+			kelas, kelas,
+			kelas, kelas,
 		}
 	} else {
 		// Global stats for Admin
