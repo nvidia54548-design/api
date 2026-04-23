@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ const (
 
 var (
 	// Headers for CSV exports
-	csvAbsensiHeaders = []string{"No", "NIS", "Nama Siswa", "Kelas", "Jurusan", "Tanggal", "Status", "Deskripsi"}
+	csvAbsensiHeaders = []string{"No", "NIS", "Nama Siswa", "Kelas", "Jurusan", "Tanggal", "Status"}
 	csvLaporanHeaders = []string{"Status", "Jumlah", "Persentase"}
 	csvDetailHeaders  = csvAbsensiHeaders // Same structure for detail section
 )
@@ -91,8 +92,8 @@ func ExportAbsensiCSV(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Build query
 		query := db.Model(&models.Absensi{}).
-			Preload("Siswa").
-			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis")
+			Preload("Siswa.KelasRef").
+			Preload("Siswa.Account")
 
 		// Apply date filters
 		if req.StartDate != "" {
@@ -102,16 +103,25 @@ func ExportAbsensiCSV(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			query = query.Where("DATE(absensi.tanggal) <= ?", req.EndDate)
 		}
 
-		// Apply class and department filters
-		if req.Kelas != "" {
-			query = query.Where("siswa.kelas = ?", req.Kelas)
-		}
-		if req.Jurusan != "" {
-			query = query.Where("siswa.jurusan = ?", req.Jurusan)
+		// Apply class and department filters via kelas table
+		if req.Kelas != "" || req.Jurusan != "" {
+			query = query.Joins("JOIN siswa ON absensi.id_siswa = siswa.id_siswa")
+			if req.Kelas != "" {
+				query = query.Joins("JOIN kelas ON siswa.id_kelas = kelas.id_kelas")
+				// Assuming kelas format is like "XII A", we need to match tingkatan and part
+				// For now, we'll try to match the part field
+				query = query.Where("kelas.part LIKE ?", "%"+req.Kelas+"%")
+			}
+			if req.Jurusan != "" {
+				if req.Kelas == "" {
+					query = query.Joins("JOIN kelas ON siswa.id_kelas = kelas.id_kelas")
+				}
+				query = query.Where("kelas.jurusan = ?", req.Jurusan)
+			}
 		}
 
 		var absensiList []models.Absensi
-		if err := query.Order("absensi.tanggal DESC, siswa.kelas, siswa.nis").Find(&absensiList).Error; err != nil {
+		if err := query.Find(&absensiList).Error; err != nil {
 			logger.Errorw("Failed to fetch absensi for export",
 				"error", err.Error(),
 			)
@@ -141,24 +151,27 @@ func ExportAbsensiCSV(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Write data rows
 		for i, absensi := range absensiList {
+			nis := ""
 			namaSiswa := ""
 			kelas := ""
 			jurusan := ""
 			if absensi.Siswa != nil {
+				nis = absensi.Siswa.NIS
 				namaSiswa = absensi.Siswa.NamaSiswa
-				kelas = absensi.Siswa.Kelas
-				jurusan = absensi.Siswa.Jurusan
+				if absensi.Siswa.KelasRef != nil {
+					kelas = strconv.Itoa(int(absensi.Siswa.KelasRef.Tingkatan)) + absensi.Siswa.KelasRef.Part
+					jurusan = absensi.Siswa.KelasRef.Jurusan
+				}
 			}
 
 			row := []string{
 				fmt.Sprintf("%d", i+1),
-				absensi.NIS,
+				nis,
 				namaSiswa,
 				kelas,
 				jurusan,
 				absensi.Tanggal.Format("2006-01-02"),
 				absensi.Status,
-				absensi.Deskripsi,
 			}
 			if err := writeCSVRow(writer, logger, row, fmt.Sprintf("data_row_%d", i+1)); err != nil {
 				// Error already logged by writeCSVRow
@@ -388,24 +401,27 @@ func ExportLaporanCSV(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// 2. Detail Data Rows Section
 		for i, absensi := range absensiList {
+			nis := ""
 			namaSiswa := ""
 			kelas := ""
 			jurusan := ""
 			if absensi.Siswa != nil {
+				nis = absensi.Siswa.NIS
 				namaSiswa = absensi.Siswa.NamaSiswa
-				kelas = absensi.Siswa.Kelas
-				jurusan = absensi.Siswa.Jurusan
+				if absensi.Siswa.KelasRef != nil {
+					kelas = strconv.Itoa(int(absensi.Siswa.KelasRef.Tingkatan)) + absensi.Siswa.KelasRef.Part
+					jurusan = absensi.Siswa.KelasRef.Jurusan
+				}
 			}
 
 			row := []string{
 				fmt.Sprintf("%d", i+1),
-				absensi.NIS,
+				nis,
 				namaSiswa,
 				kelas,
 				jurusan,
 				absensi.Tanggal.Format("2006-01-02"),
 				absensi.Status,
-				absensi.Deskripsi,
 			}
 			if err := writeCSVRow(writer, logger, row, fmt.Sprintf("detail_row_%d", i+1)); err != nil {
 				// Error already logged by writeCSVRow
@@ -473,8 +489,8 @@ func ExportAbsensiExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 
 		// Build query
 		query := db.Model(&models.Absensi{}).
-			Preload("Siswa").
-			Joins("LEFT JOIN siswa ON absensi.nis = siswa.nis")
+			Preload("Siswa.KelasRef").
+			Preload("Siswa.Account")
 
 		// Apply date filters
 		if req.StartDate != "" {
@@ -484,16 +500,25 @@ func ExportAbsensiExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 			query = query.Where("DATE(absensi.tanggal) <= ?", req.EndDate)
 		}
 
-		// Apply class and department filters
-		if req.Kelas != "" {
-			query = query.Where("siswa.kelas = ?", req.Kelas)
-		}
-		if req.Jurusan != "" {
-			query = query.Where("siswa.jurusan = ?", req.Jurusan)
+		// Apply class and department filters via kelas table
+		if req.Kelas != "" || req.Jurusan != "" {
+			query = query.Joins("JOIN siswa ON absensi.id_siswa = siswa.id_siswa")
+			if req.Kelas != "" {
+				query = query.Joins("JOIN kelas ON siswa.id_kelas = kelas.id_kelas")
+				// Assuming kelas format is like "XII A", we need to match tingkatan and part
+				// For now, we'll try to match the part field
+				query = query.Where("kelas.part LIKE ?", "%"+req.Kelas+"%")
+			}
+			if req.Jurusan != "" {
+				if req.Kelas == "" {
+					query = query.Joins("JOIN kelas ON siswa.id_kelas = kelas.id_kelas")
+				}
+				query = query.Where("kelas.jurusan = ?", req.Jurusan)
+			}
 		}
 
 		var absensiList []models.Absensi
-		if err := query.Order("absensi.tanggal DESC, siswa.kelas, siswa.nis").Find(&absensiList).Error; err != nil {
+		if err := query.Find(&absensiList).Error; err != nil {
 			logger.Errorw("Failed to fetch absensi for export",
 				"error", err.Error(),
 			)
@@ -572,13 +597,17 @@ func ExportAbsensiExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 		// Write data rows
 		for rowIndex, absensi := range absensiList {
 			rowNum := rowIndex + 2 // Start from row 2 (after header)
+			nis := ""
 			namaSiswa := ""
 			kelas := ""
 			jurusan := ""
 			if absensi.Siswa != nil {
+				nis = absensi.Siswa.NIS
 				namaSiswa = absensi.Siswa.NamaSiswa
-				kelas = absensi.Siswa.Kelas
-				jurusan = absensi.Siswa.Jurusan
+				if absensi.Siswa.KelasRef != nil {
+					kelas = strconv.Itoa(int(absensi.Siswa.KelasRef.Tingkatan)) + absensi.Siswa.KelasRef.Part
+					jurusan = absensi.Siswa.KelasRef.Jurusan
+				}
 			}
 
 			// Calculate cell names for this row
@@ -586,7 +615,7 @@ func ExportAbsensiExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
 				return
 			}
-			if err := setCellValue(sheetName, fmt.Sprintf("B%d", rowNum), absensi.NIS); err != nil {
+			if err := setCellValue(sheetName, fmt.Sprintf("B%d", rowNum), nis); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
 				return
 			}
@@ -607,10 +636,6 @@ func ExportAbsensiExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 				return
 			}
 			if err := setCellValue(sheetName, fmt.Sprintf("G%d", rowNum), absensi.Status); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
-				return
-			}
-			if err := setCellValue(sheetName, fmt.Sprintf("H%d", rowNum), absensi.Deskripsi); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
 				return
 			}
@@ -1037,20 +1062,24 @@ func ExportLaporanExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 
 		// Write detail data rows
 		for _, absensi := range absensiList {
+			nis := ""
 			namaSiswa := ""
 			kelas := ""
 			jurusan := ""
 			if absensi.Siswa != nil {
+				nis = absensi.Siswa.NIS
 				namaSiswa = absensi.Siswa.NamaSiswa
-				kelas = absensi.Siswa.Kelas
-				jurusan = absensi.Siswa.Jurusan
+				if absensi.Siswa.KelasRef != nil {
+					kelas = strconv.Itoa(int(absensi.Siswa.KelasRef.Tingkatan)) + absensi.Siswa.KelasRef.Part
+					jurusan = absensi.Siswa.KelasRef.Jurusan
+				}
 			}
 
 			if err := setCellValue(sheetName, fmt.Sprintf("A%d", row), row-1); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
 				return
 			} // No (row index starting from 1)
-			if err := setCellValue(sheetName, fmt.Sprintf("B%d", row), absensi.NIS); err != nil {
+			if err := setCellValue(sheetName, fmt.Sprintf("B%d", row), nis); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
 				return
 			}
@@ -1074,15 +1103,11 @@ func ExportLaporanExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
 				return
 			}
-			if err := setCellValue(sheetName, fmt.Sprintf("H%d", row), absensi.Deskripsi); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menulis file Excel"})
-				return
-			}
 			row++
 		}
 
 		// Auto-adjust column widths
-		colLetters := []string{"A", "B", "C", "D", "E", "F", "G", "H"}
+		colLetters := []string{"A", "B", "C", "D", "E", "F", "G"}
 		widths := []float64{5, 12, 20, 12, 15, 12, 12, 20}
 		for i, colLetter := range colLetters {
 			if err := f.SetColWidth(sheetName, colLetter, colLetter, widths[i]); err != nil {

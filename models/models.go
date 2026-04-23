@@ -28,21 +28,17 @@ func (Kelas) TableName() string {
 }
 
 type Siswa struct {
-	IDSiswa          int        `gorm:"primaryKey;column:id_siswa" json:"id_siswa"`
-	IDAccount        int        `gorm:"column:id_account;not null" json:"id_account"`
-	NIS              string     `gorm:"column:nis;size:20;not null;unique" json:"nis"`
-	NamaSiswa        string     `gorm:"column:nama_siswa;not null" json:"nama_siswa"`
-	JK               string     `gorm:"column:jk;type:char(1);not null" json:"jk"`
-	IDKelas          int        `gorm:"column:id_kelas;not null" json:"id_kelas"`
-	AcademicYear     string     `gorm:"column:academic_year" json:"academic_year"`
-	CurrentSemester  int        `gorm:"column:current_semester" json:"current_semester"`
-	ClassStatus      string     `gorm:"column:class_status" json:"class_status"`
-	LastPromotionAt  *time.Time `gorm:"column:last_promotion_at" json:"last_promotion_at,omitempty"`
-	Account          *Account   `gorm:"foreignKey:IDAccount;references:ID" json:"-"`
-	KelasRef         *Kelas     `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
-	Jurusan          string     `gorm:"column:jurusan" json:"jurusan,omitempty"`
-	Kelas            string     `gorm:"column:kelas" json:"kelas,omitempty"`
-	Part             string     `gorm:"-" json:"part,omitempty"`
+	IDSiswa         int        `gorm:"primaryKey;column:id_siswa" json:"id_siswa"`
+	IDAccount       int        `gorm:"column:id_account;not null" json:"id_account"`
+	NIS             string     `gorm:"column:nis;size:20;not null;unique" json:"nis"`
+	NamaSiswa       string     `gorm:"column:nama_siswa;not null" json:"nama_siswa"`
+	JK              string     `gorm:"column:jk;type:char(1);not null" json:"jk"`
+	IDKelas         *int       `gorm:"column:id_kelas" json:"id_kelas"`
+	AcademicYear    *string    `gorm:"column:academic_year;size:9" json:"academic_year,omitempty"`
+	ClassStatus     string     `gorm:"column:class_status;default:'active'" json:"class_status"`
+	LastPromotionAt *time.Time `gorm:"column:last_promotion_at" json:"last_promotion_at,omitempty"`
+	Account         *Account   `gorm:"foreignKey:IDAccount;references:ID" json:"-"`
+	KelasRef        *Kelas     `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
 }
 
 func (Siswa) TableName() string {
@@ -51,14 +47,12 @@ func (Siswa) TableName() string {
 
 type JadwalSholat struct {
 	IDJadwal     int       `gorm:"primaryKey;column:id_jadwal" json:"id_jadwal"`
-	Hari         string    `gorm:"not null" json:"hari"`
-	JenisSholat  string    `gorm:"not null;column:jenis_sholat" json:"jenis_sholat"`
-	WaktuMulai   string    `gorm:"column:waktu_mulai;type:time" json:"waktu_mulai"`
-	WaktuSelesai string    `gorm:"column:waktu_selesai;type:time" json:"waktu_selesai"`
 	IDKelas      int       `gorm:"column:id_kelas;not null" json:"id_kelas"`
-	Jurusan      string    `gorm:"column:jurusan" json:"jurusan,omitempty"`
-	Kelas        string    `gorm:"column:kelas" json:"kelas,omitempty"`
-	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`
+	Hari         string    `gorm:"column:hari;not null" json:"hari"`
+	JenisSholat  string    `gorm:"column:jenis_sholat;not null" json:"jenis_sholat"`
+	WaktuMulai   string    `gorm:"column:waktu_mulai;type:time;not null" json:"waktu_mulai"`
+	WaktuSelesai string    `gorm:"column:waktu_selesai;type:time;not null" json:"waktu_selesai"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	KelasRef     *Kelas    `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
 }
 
@@ -68,14 +62,13 @@ func (JadwalSholat) TableName() string {
 
 type Absensi struct {
 	IDAbsen   int       `gorm:"primaryKey;column:id_absen" json:"id_absen"`
-	IDSiswa   int       `gorm:"not null;column:id_siswa" json:"id_siswa"`
-	IDJadwal  int       `gorm:"not null;column:id_jadwal" json:"id_jadwal"`
-	Tanggal   time.Time `gorm:"type:date;not null" json:"tanggal"`
-	Status    string    `gorm:"not null" json:"status"`
-	Deskripsi string    `json:"deskripsi"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	IDJadwal  int       `gorm:"column:id_jadwal;not null" json:"id_jadwal"`
+	IDSiswa   int       `gorm:"column:id_siswa;not null" json:"id_siswa"`
+	Tanggal   time.Time `gorm:"column:tanggal;type:date;not null" json:"tanggal"`
+	Status    string    `gorm:"column:status;not null" json:"status"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	Siswa     *Siswa    `gorm:"foreignKey:IDSiswa;references:IDSiswa" json:"siswa,omitempty"`
-	NIS       string    `gorm:"column:nis" json:"nis,omitempty"`
+	Jadwal    *JadwalSholat `gorm:"foreignKey:IDJadwal;references:IDJadwal" json:"jadwal,omitempty"`
 }
 
 func (Absensi) TableName() string {
@@ -113,14 +106,14 @@ type StudentClassTransition struct {
 	Action           string    `gorm:"column:action;size:30;not null" json:"action"`
 	FromClass        *int      `gorm:"column:from_class" json:"from_class,omitempty"`
 	ToClass          *int      `gorm:"column:to_class" json:"to_class,omitempty"`
-	FromAcademicYear string    `gorm:"column:from_academic_year;size:9" json:"from_academic_year,omitempty"`
-	ToAcademicYear   string    `gorm:"column:to_academic_year;size:9" json:"to_academic_year,omitempty"`
+	FromAcademicYear *string   `gorm:"column:from_academic_year;size:9" json:"from_academic_year,omitempty"`
+	ToAcademicYear   *string   `gorm:"column:to_academic_year;size:9" json:"to_academic_year,omitempty"`
 	FromSemester     *int      `gorm:"column:from_semester" json:"from_semester,omitempty"`
 	ToSemester       *int      `gorm:"column:to_semester" json:"to_semester,omitempty"`
-	FromStatus       string    `gorm:"column:from_status;size:30" json:"from_status,omitempty"`
-	ToStatus         string    `gorm:"column:to_status;size:30" json:"to_status,omitempty"`
+	FromStatus       *string   `gorm:"column:from_status;size:20" json:"from_status,omitempty"`
+	ToStatus         *string   `gorm:"column:to_status;size:20" json:"to_status,omitempty"`
 	DecidedBy        *int      `gorm:"column:decided_by" json:"decided_by,omitempty"`
-	Note             string    `gorm:"column:note" json:"note,omitempty"`
+	Note             *string   `gorm:"column:note" json:"note,omitempty"`
 	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 }
 

@@ -473,19 +473,16 @@ func DeleteSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 }
 
 type CreateAbsensiRequest struct {
-	IDJadwal  int    `json:"id_jadwal" binding:"required"`
-	Tanggal   string `json:"tanggal" binding:"required"`
-	Status    string `json:"status" binding:"required,oneof=hadir izin sakit alpha"`
-	Deskripsi string `json:"deskripsi"`
+	IDJadwal int    `json:"id_jadwal" binding:"required"`
+	Tanggal  string `json:"tanggal" binding:"required"`
+	Status   string `json:"status" binding:"required,oneof=hadir izin sakit alpha"`
 }
 
 type AbsensiResponse struct {
 	IDAbsen   int    `json:"id_absen"`
-	NIS       string `json:"nis"`
 	IDJadwal  int    `json:"id_jadwal"`
 	Tanggal   string `json:"tanggal"`
 	Status    string `json:"status"`
-	Deskripsi string `json:"deskripsi"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -659,7 +656,6 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			// Record exists. Update it if the new status is izin/sakit (or any valid status override)
 			// User specifically mentioned converting 'alpha' to 'izin/sakit'
 			existingAbsensi.Status = req.Status
-			existingAbsensi.Deskripsi = req.Deskripsi
 
 			if err := db.Save(&existingAbsensi).Error; err != nil {
 				logger.Errorw("Failed to update existing absensi", "nis", nis, "error", err.Error())
@@ -670,12 +666,10 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		} else if err == gorm.ErrRecordNotFound {
 			// Record doesn't exist, create new one
 			absensi = models.Absensi{
-				IDSiswa:   siswa.IDSiswa,
-				NIS:       nis,
-				IDJadwal:  req.IDJadwal,
-				Tanggal:   tanggal,
-				Status:    req.Status,
-				Deskripsi: req.Deskripsi,
+				IDSiswa:  siswa.IDSiswa,
+				IDJadwal: req.IDJadwal,
+				Tanggal:  tanggal,
+				Status:   req.Status,
 			}
 
 			if err := db.Create(&absensi).Error; err != nil {
@@ -704,11 +698,9 @@ func CreateAbsensi(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		c.JSON(http.StatusCreated, AbsensiResponse{
 			IDAbsen:   absensi.IDAbsen,
-			NIS:       absensi.NIS,
 			IDJadwal:  absensi.IDJadwal,
 			Tanggal:   absensi.Tanggal.Format("2006-01-02"),
 			Status:    absensi.Status,
-			Deskripsi: absensi.Deskripsi,
 			CreatedAt: absensi.CreatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}

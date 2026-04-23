@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,7 +51,6 @@ type AbsensiHistoryItem struct {
 	Hari        string `json:"hari"`
 	JenisSholat string `json:"jenis_sholat"`
 	Status      string `json:"status"`
-	Deskripsi   string `json:"deskripsi"`
 }
 
 type HistorySiswaRequest struct {
@@ -123,7 +123,7 @@ func GetHistorySiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		// Get absensi for the week with jadwal info
 		var absensiList []models.Absensi
 		if err := db.Model(&models.Absensi{}).
-			Where("nis = ? AND tanggal >= ? AND tanggal <= ?", nis, startDate, endDate).
+			Where("id_siswa = ? AND tanggal >= ? AND tanggal <= ?", siswa.IDSiswa, startDate, endDate).
 			Order("tanggal DESC").
 			Find(&absensiList).Error; err != nil {
 			logger.Errorw("Failed to fetch absensi history",
@@ -154,7 +154,6 @@ func GetHistorySiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				Hari:        hari,
 				JenisSholat: jenisSholat,
 				Status:      absensi.Status,
-				Deskripsi:   absensi.Deskripsi,
 			})
 		}
 
@@ -262,7 +261,6 @@ type AbsensiStaffItem struct {
 	Hari        string `json:"hari"`
 	JenisSholat string `json:"jenis_sholat"`
 	Status      string `json:"status"`
-	Deskripsi   string `json:"deskripsi"`
 }
 
 // GetHistoryStaff godoc
@@ -489,12 +487,16 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		var items []AbsensiStaffItem
 		for _, absensi := range absensiList {
 			namaSiswa := ""
+			nis := ""
 			kelas := ""
 			jurusan := ""
 			if absensi.Siswa != nil {
 				namaSiswa = absensi.Siswa.NamaSiswa
-				kelas = absensi.Siswa.Kelas
-				jurusan = absensi.Siswa.Jurusan
+				nis = absensi.Siswa.NIS
+				if absensi.Siswa.KelasRef != nil {
+					kelas = strconv.Itoa(int(absensi.Siswa.KelasRef.Tingkatan)) + absensi.Siswa.KelasRef.Part
+					jurusan = absensi.Siswa.KelasRef.Jurusan
+				}
 			}
 
 			var jadwal models.JadwalSholat
@@ -507,7 +509,7 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 			items = append(items, AbsensiStaffItem{
 				IDAbsen:     absensi.IDAbsen,
-				NIS:         absensi.NIS,
+				NIS:         nis,
 				NamaSiswa:   namaSiswa,
 				Kelas:       kelas,
 				Jurusan:     jurusan,
@@ -515,7 +517,6 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				Hari:        hari,
 				JenisSholat: jenisSholat,
 				Status:      absensi.Status,
-				Deskripsi:   absensi.Deskripsi,
 			})
 		}
 

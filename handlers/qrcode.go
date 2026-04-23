@@ -348,12 +348,10 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			return
 		}
 		absensi := models.Absensi{
-			IDSiswa:   siswa.IDSiswa,
-			NIS:       nisStr,
-			IDJadwal:  idJadwal,
-			Tanggal:   tanggal,
-			Status:    "hadir",
-			Deskripsi: "Absensi via QR code",
+			IDSiswa:  siswa.IDSiswa,
+			IDJadwal: idJadwal,
+			Tanggal:  tanggal,
+			Status:   "hadir",
 		}
 
 		if err := db.Create(&absensi).Error; err != nil {
