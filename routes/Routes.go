@@ -117,6 +117,72 @@ func setupAPIV2Routes(api *gin.RouterGroup, db *gorm.DB, logger *zap.SugaredLogg
 		prayerSchedules.PUT("/:id", middleware.AuthMiddleware("admin"), handlers.UpdateJadwalSholat(db, logger))
 		prayerSchedules.DELETE("/:id", middleware.AuthMiddleware("admin"), handlers.DeleteJadwalSholat(db, logger))
 	}
+
+	// Academic year management
+	years := api.Group("/academic-years")
+	years.Use(middleware.AuthMiddleware("admin"))
+	{
+		years.GET("", handlers.GetTahunMasuk(db, logger))
+		years.POST("", handlers.CreateTahunMasuk(db, logger))
+		years.GET("/:id", handlers.GetTahunMasukByID(db, logger))
+		years.PUT("/:id", handlers.UpdateTahunMasuk(db, logger))
+		years.DELETE("/:id", handlers.DeleteTahunMasuk(db, logger))
+	}
+
+	// Semester management
+	semesters := api.Group("/semesters")
+	semesters.Use(middleware.AuthMiddleware("admin"))
+	{
+		semesters.GET("", handlers.GetSemesterAkademik(db, logger))
+		semesters.POST("", handlers.CreateSemesterAkademik(db, logger))
+		semesters.GET("/:id", handlers.GetSemesterAkademikByID(db, logger))
+		semesters.PUT("/:id", handlers.UpdateSemesterAkademik(db, logger))
+		semesters.DELETE("/:id", handlers.DeleteSemesterAkademik(db, logger))
+	}
+
+	// Class teacher assignments
+	classTeachers := api.Group("/class-teachers")
+	classTeachers.Use(middleware.AuthMiddleware("admin"))
+	{
+		classTeachers.GET("", handlers.GetWaliKelas(db, logger))
+		classTeachers.POST("", handlers.CreateWaliKelas(db, logger))
+		classTeachers.GET("/:id", handlers.GetWaliKelasByID(db, logger))
+		classTeachers.PUT("/:id", handlers.UpdateWaliKelas(db, logger))
+		classTeachers.DELETE("/:id", handlers.DeleteWaliKelas(db, logger))
+	}
+
+	// Prayer types management
+	prayerTypes := api.Group("/prayer-types")
+	prayerTypes.Use(middleware.AuthMiddleware("admin"))
+	{
+		prayerTypes.GET("", handlers.GetJenisSholat(db, logger))
+		prayerTypes.POST("", handlers.CreateJenisSholat(db, logger))
+		prayerTypes.GET("/:id", handlers.GetJenisSholatByID(db, logger))
+		prayerTypes.PUT("/:id", handlers.UpdateJenisSholat(db, logger))
+		prayerTypes.DELETE("/:id", handlers.DeleteJenisSholat(db, logger))
+	}
+
+	// Prayer times management
+	prayerTimes := api.Group("/prayer-times")
+	prayerTimes.Use(middleware.AuthMiddleware("admin"))
+	{
+		prayerTimes.GET("", handlers.GetWaktuSholat(db, logger))
+		prayerTimes.POST("", handlers.CreateWaktuSholat(db, logger))
+		prayerTimes.GET("/:id", handlers.GetWaktuSholatByID(db, logger))
+		prayerTimes.PUT("/:id", handlers.UpdateWaktuSholat(db, logger))
+		prayerTimes.DELETE("/:id", handlers.DeleteWaktuSholat(db, logger))
+	}
+
+	// Dhuha rotation groups
+	dhuhaGroups := api.Group("/dhuha-groups")
+	dhuhaGroups.Use(middleware.AuthMiddleware("admin"))
+	{
+		dhuhaGroups.GET("", handlers.GetGiliranDhuha(db, logger))
+		dhuhaGroups.POST("", handlers.CreateGiliranDhuha(db, logger))
+		dhuhaGroups.GET("/:id", handlers.GetGiliranDhuhaByID(db, logger))
+		dhuhaGroups.PUT("/:id", handlers.UpdateGiliranDhuha(db, logger))
+		dhuhaGroups.DELETE("/:id", handlers.DeleteGiliranDhuha(db, logger))
+	}
 }
 
 // setupAPIRoutes configures all API endpoints for a given router group

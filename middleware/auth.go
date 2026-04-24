@@ -62,7 +62,11 @@ func AuthMiddleware(allowedRoles ...string) gin.HandlerFunc {
 		if len(allowedRoles) > 0 {
 			roleFound := false
 			for _, allowedRole := range allowedRoles {
-				if claims.Role == allowedRole {
+				// Special handling: wali_kelas requires guru role (additional checks in handlers)
+				if allowedRole == "wali_kelas" && claims.Role == "guru" {
+					roleFound = true
+					break
+				} else if claims.Role == allowedRole {
 					roleFound = true
 					break
 				}

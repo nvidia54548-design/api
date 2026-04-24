@@ -178,20 +178,6 @@ func Login(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat token akses"})
 				return
 			}
-			refreshToken, refreshErr := utils.GenerateRefreshToken(strconv.Itoa(siswa.IDAccount), "siswa")
-			if refreshErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
-				return
-			}
-			claims, claimErr := utils.ValidateToken(refreshToken)
-			if claimErr != nil || claims.ExpiresAt == nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
-				return
-			}
-			if err := db.Create(&models.RefreshToken{AccountID: siswa.IDAccount, Token: refreshToken, ExpiresAt: claims.ExpiresAt.Time}).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
-				return
-			}
 
 			kelas := ""
 			jurusan := ""
@@ -200,15 +186,14 @@ func Login(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				jurusan = siswa.KelasRef.Jurusan
 			}
 			c.JSON(http.StatusOK, gin.H{"message": "Login berhasil", "data": gin.H{
-				"token":         accessToken,
-				"refresh_token": refreshToken,
-				"role":          "siswa",
-				"nis":           siswa.NIS,
-				"nama_siswa":    siswa.NamaSiswa,
-				"jk":            siswa.JK,
-				"jurusan":       jurusan,
-				"kelas":         kelas,
-				"email":         siswa.Account.Email,
+				"token": accessToken,
+				"role":  "siswa",
+				"nis":   siswa.NIS,
+				"nama_siswa": siswa.NamaSiswa,
+				"jk":    siswa.JK,
+				"jurusan": jurusan,
+				"kelas": kelas,
+				"email": siswa.Account.Email,
 			}})
 			return
 		}
@@ -234,32 +219,15 @@ func Login(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat token akses staff"})
 			return
 		}
-		refreshToken, refreshErr := utils.GenerateRefreshToken(strconv.Itoa(staff.IDAccount), staff.Account.Role)
-		if refreshErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
-			return
-		}
-		claims, claimErr := utils.ValidateToken(refreshToken)
-		if claimErr != nil || claims.ExpiresAt == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
-			return
-		}
-		if err := db.Create(&models.RefreshToken{AccountID: staff.IDAccount, Token: refreshToken, ExpiresAt: claims.ExpiresAt.Time}).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat sesi login"})
-			return
-		}
 
 		_ = loginByEmail
 		c.JSON(http.StatusOK, gin.H{"message": "Login berhasil", "data": gin.H{
-			"token":         accessToken,
-			"refresh_token": refreshToken,
-			"role":          staff.Account.Role,
-			"username":      staff.Account.Email,
-			"nis":           staff.Account.Email,
-			"nama":          staff.Nama,
-			"name":          staff.Nama,
-			"nip":           staff.NIP,
-			"is_staff":      true,
+			"token":    accessToken,
+			"role":     staff.Account.Role,
+			"username": staff.Account.Email,
+			"nama":     staff.Nama,
+			"name":     staff.Nama,
+			"nip":      staff.NIP,
 		}})
 	}
 }
@@ -330,79 +298,12 @@ func Me(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 func RefreshToken(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req struct {
-			RefreshToken string `json:"refresh_token" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "Refresh token diperlukan", "error": err.Error()})
-			return
-		}
-
-		refreshClaims, tokenErr := utils.ValidateToken(req.RefreshToken)
-		if tokenErr != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.", "code": "REFRESH_TOKEN_INVALID"})
-			return
-		}
-
-		var stored models.RefreshToken
-		if err := db.First(&stored, "token = ?", req.RefreshToken).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.", "code": "REFRESH_TOKEN_INVALID"})
-			return
-		}
-
-		tokenAccountID, convErr := strconv.Atoi(refreshClaims.Username)
-		if convErr != nil {
-			tokenAccountID, convErr = strconv.Atoi(refreshClaims.NIS)
-		}
-		if convErr != nil || tokenAccountID == 0 || stored.AccountID != tokenAccountID {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.", "code": "REFRESH_TOKEN_INVALID"})
-			return
-		}
-
-		var account models.Account
-		if err := db.First(&account, "id = ?", stored.AccountID).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.", "code": "REFRESH_TOKEN_INVALID"})
-			return
-		}
-		if refreshClaims.Role != "" && refreshClaims.Role != account.Role {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "Sesi tidak valid atau sudah berakhir. Silakan login kembali.", "code": "REFRESH_TOKEN_INVALID"})
-			return
-		}
-
-		var newAccessToken string
-		var err error
-		if account.Role == "siswa" {
-			var siswa models.Siswa
-			if errSiswa := db.First(&siswa, "id_account = ?", stored.AccountID).Error; errSiswa != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal mengambil data siswa"})
-				return
-			}
-			newAccessToken, err = utils.GenerateToken(siswa.NIS, account.Email, "siswa", siswa.NamaSiswa)
-		} else {
-			var staff models.Staff
-			if errStaff := db.First(&staff, "id_account = ?", stored.AccountID).Error; errStaff != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal mengambil data staff"})
-				return
-			}
-			newAccessToken, err = utils.GenerateTokenWithNIP(account.Email, account.Email, account.Role, staff.Nama, staff.NIP)
-		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat token baru"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "Token berhasil diperbarui", "access_token": newAccessToken})
+		c.JSON(http.StatusNotImplemented, gin.H{"message": "Refresh token tidak didukung"})
 	}
 }
 
 func Logout(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req struct {
-			RefreshToken string `json:"refresh_token"`
-		}
-		if err := c.ShouldBindJSON(&req); err == nil && req.RefreshToken != "" {
-			db.Delete(&models.RefreshToken{}, "token = ?", req.RefreshToken)
-		}
 		c.JSON(http.StatusOK, gin.H{"message": "Berhasil logout"})
 	}
 }

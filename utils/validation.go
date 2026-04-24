@@ -141,18 +141,122 @@ func (v *Validator) InList(field, value string, allowed []string) *Validator {
 	return v
 }
 
-// Gender validates gender value (L/P or Laki-laki/Perempuan)
+// Gender validates gender value (L/P)
 func (v *Validator) Gender(field, value string) *Validator {
 	if value == "" {
 		return v
 	}
-	allowed := []string{"L", "P", "Laki-laki", "Perempuan"}
+	allowed := []string{"L", "P"}
 	for _, a := range allowed {
-		if strings.EqualFold(value, a) {
+		if value == a {
 			return v
 		}
 	}
-	v.AddError(field, "must be L, P, Laki-laki, or Perempuan")
+	v.AddError(field, "must be L or P")
+	return v
+}
+
+// Role validates account role
+func (v *Validator) Role(field, value string) *Validator {
+	if value == "" {
+		return v
+	}
+	allowed := []string{"admin", "guru", "siswa"}
+	return v.InList(field, value, allowed)
+}
+
+// TipeStaff validates staff type
+func (v *Validator) TipeStaff(field, value string) *Validator {
+	if value == "" {
+		return v
+	}
+	allowed := []string{"admin", "guru"}
+	return v.InList(field, value, allowed)
+}
+
+// ClassStatus validates student class status
+func (v *Validator) ClassStatus(field, value string) *Validator {
+	if value == "" {
+		return v
+	}
+	allowed := []string{"active", "inactive", "graduated", "transferred"}
+	return v.InList(field, value, allowed)
+}
+
+// Tingkatan validates class level
+func (v *Validator) Tingkatan(field string, value int) *Validator {
+	if value < 10 || value > 12 {
+		v.AddError(field, "must be 10, 11, or 12")
+	}
+	return v
+}
+
+// NamaJenis validates prayer type name
+func (v *Validator) NamaJenis(field, value string) *Validator {
+	if value == "" {
+		return v
+	}
+	allowed := []string{"Subuh", "Dzuhur", "Ashar", "Maghrib", "Isya", "Dhuha", "Jumat"}
+	return v.InList(field, value, allowed)
+}
+
+// AbsensiStatus validates attendance status
+func (v *Validator) AbsensiStatus(field, value string) *Validator {
+	if value == "" {
+		return v
+	}
+	allowed := []string{"hadir", "izin", "sakit", "alpha"}
+	return v.InList(field, value, allowed)
+}
+
+// Semester validates semester number
+func (v *Validator) Semester(field string, value int) *Validator {
+	if value != 1 && value != 2 {
+		v.AddError(field, "must be 1 or 2")
+	}
+	return v
+}
+
+// Hari validates day of week
+func (v *Validator) Hari(field, value string) *Validator {
+	if value == "" {
+		return v
+	}
+	allowed := []string{"Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Ahad"}
+	return v.InList(field, value, allowed)
+}
+
+// Tahun validates academic year format
+func (v *Validator) Tahun(field, value string) *Validator {
+	if value == "" {
+		return v
+	}
+	tahunRegex := regexp.MustCompile(`^\d{4}/\d{4}$`)
+	if !tahunRegex.MatchString(value) {
+		v.AddError(field, "must match YYYY/YYYY format")
+	}
+	return v
+}
+
+// DateRange validates that start date is before end date
+func (v *Validator) DateRange(startField, endField, startDate, endDate string) *Validator {
+	if startDate == "" || endDate == "" {
+		return v
+	}
+	if startDate >= endDate {
+		v.AddError(endField, "must be after "+startField)
+	}
+	return v
+}
+
+// TimeRange validates that start time is before end time
+func (v *Validator) TimeRange(startField, endField, startTime, endTime string) *Validator {
+	if startTime == "" || endTime == "" {
+		return v
+	}
+	if startTime >= endTime {
+		v.AddError(endField, "must be after "+startField)
+	}
 	return v
 }
 

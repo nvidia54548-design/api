@@ -27,11 +27,11 @@ type QRCodeResponse struct {
 }
 
 type QRCodeData struct {
-	QRCode      string `json:"qr_code"`
-	Token       string `json:"token"`
-	ExpiresAt   string `json:"expires_at"`
-	JenisSholat string `json:"jenis_sholat"`
-	IDJadwal    int    `json:"id_jadwal"`
+	QRCode       string `json:"qr_code"`
+	Token        string `json:"token"`
+	ExpiresAt    string `json:"expires_at"`
+	JenisSholat  string `json:"jenis_sholat"`
+	IDTemplate   int    `json:"id_template"`
 }
 
 // GenerateQRCode godoc
@@ -57,35 +57,53 @@ func GenerateQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		currentDay := getDayName(now.Weekday())
 		currentTime := now.Format("15:04:05")
 
-		// Find active jadwal sholat for current day and time
-		var jadwal models.JadwalSholat
-
-		// Support test forcing: allow admins to request a specific jadwal or jenis_sholat when ENVIRONMENT != production
+		// Support test forcing: allow admins to request a specific template or jenis_sholat when ENVIRONMENT != production
 		force := c.Query("force")
 		jenis := c.Query("jenis_sholat")
-		idJadwalStr := c.Query("id_jadwal")
+		idTemplateStr := c.Query("id_template")
 
+		var template models.JadwalSholatTemplate
+		var jenisSholatRef models.JenisSholat
 		var err error
+
 		if force == "true" && os.Getenv("ENVIRONMENT") != "production" {
-			if idJadwalStr != "" {
-				id, errConv := strconv.Atoi(idJadwalStr)
+			if idTemplateStr != "" {
+				id, errConv := strconv.Atoi(idTemplateStr)
 				if errConv != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"message": "id_jadwal tidak valid"})
+					c.JSON(http.StatusBadRequest, gin.H{"message": "id_template tidak valid"})
 					return
 				}
-				err = db.First(&jadwal, "id_jadwal = ?", id).Error
+				err = db.Preload("JenisRef").First(&template, "id_template = ?", id).Error
 			} else if jenis != "" {
-				err = db.Where("hari = ? AND jenis_sholat = ?", currentDay, jenis).First(&jadwal).Error
+				err = db.Model(&models.JenisSholat{}).Where("nama_jenis = ?", jenis).First(&jenisSholatRef).Error
+				if err == nil {
+					err = db.Preload("JenisRef").Where("hari = ? AND id_jenis = ?", currentDay, jenisSholatRef.IDJenis).First(&template).Error
+				}
 			} else {
-				// fallback to active jadwal behavior
-				err = db.Where("hari = ? AND waktu_mulai <= ? AND waktu_selesai >= ?",
-					currentDay, currentTime, currentTime).
-					First(&jadwal).Error
+				// fallback to active template behavior
+				err = db.Preload("JenisRef").Where("hari = ?", currentDay).First(&template).Error
+				if err == nil {
+					// Check if this template is active now
+					var waktu models.WaktuSholat
+					todayDate := now.Format("2006-01-02")
+					if db.Where("id_jenis = ? AND waktu_mulai <= ? AND waktu_selesai >= ? AND berlaku_mulai <= ? AND berlaku_sampai >= ?",
+						template.IDJenis, currentTime, currentTime, todayDate, todayDate).First(&waktu).Error != nil {
+						err = gorm.ErrRecordNotFound
+					}
+				}
 			}
 		} else {
-			err = db.Where("hari = ? AND waktu_mulai <= ? AND waktu_selesai >= ?",
-				currentDay, currentTime, currentTime).
-				First(&jadwal).Error
+			// Find active template for current day
+			err = db.Preload("JenisRef").Where("hari = ?", currentDay).First(&template).Error
+			if err == nil {
+				// Check if this template's prayer time is active now
+				var waktu models.WaktuSholat
+				todayDate := now.Format("2006-01-02")
+				if db.Where("id_jenis = ? AND waktu_mulai <= ? AND waktu_selesai >= ? AND berlaku_mulai <= ? AND berlaku_sampai >= ?",
+					template.IDJenis, currentTime, currentTime, todayDate, todayDate).First(&waktu).Error != nil {
+					err = gorm.ErrRecordNotFound
+				}
+			}
 		}
 
 		if err != nil {
@@ -107,9 +125,9 @@ func GenerateQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		// Generate expiry time (5 minutes from now)
 		expiresAt := now.Add(5 * time.Minute)
 
-		// Create token payload: id_jadwal|date|expires_unix
+		// Create token payload: id_template|date|expires_unix
 		tokenPayload := fmt.Sprintf("%d|%s|%d",
-			jadwal.IDJadwal,
+			template.IDTemplate,
 			now.Format("2006-01-02"),
 			expiresAt.Unix(),
 		)
@@ -142,9 +160,14 @@ func GenerateQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		// Convert to base64 for JSON response
 		qrBase64 := base64.StdEncoding.EncodeToString(qrPNG)
 
+		jenisSholatName := ""
+		if template.JenisRef != nil {
+			jenisSholatName = template.JenisRef.NamaJenis
+		}
+
 		logger.Infow("QR code generated successfully",
-			"jadwal_id", jadwal.IDJadwal,
-			"jenis_sholat", jadwal.JenisSholat,
+			"template_id", template.IDTemplate,
+			"jenis_sholat", jenisSholatName,
 			"expires_at", expiresAt,
 		)
 
@@ -154,8 +177,8 @@ func GenerateQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				QRCode:      "data:image/png;base64," + qrBase64,
 				Token:       token,
 				ExpiresAt:   expiresAt.Format(time.RFC3339),
-				JenisSholat: jadwal.JenisSholat,
-				IDJadwal:    jadwal.IDJadwal,
+				JenisSholat: jenisSholatName,
+				IDTemplate:  template.IDTemplate,
 			},
 		})
 	}
@@ -260,7 +283,7 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			return
 		}
 
-		// Parse payload: id_jadwal|date|expires_unix
+		// Parse payload: id_template|date|expires_unix
 		payloadParts := splitPayload(payload)
 		if len(payloadParts) != 3 {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -269,12 +292,12 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			return
 		}
 
-		var idJadwal int
+		var idTemplate int
 		var dateStr string
 		var expiresUnix int64
 
-		if _, parseErr1 := fmt.Sscanf(payloadParts[0], "%d", &idJadwal); parseErr1 != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "Format payload tidak valid: id_jadwal"})
+		if _, parseErr1 := fmt.Sscanf(payloadParts[0], "%d", &idTemplate); parseErr1 != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Format payload tidak valid: id_template"})
 			return
 		}
 		dateStr = payloadParts[1]
@@ -302,37 +325,59 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Get siswa info
 		var siswa models.Siswa
-		if errSiswa := db.First(&siswa, "nis = ?", nisStr).Error; errSiswa != nil {
+		if errSiswa := db.Preload("KelasRef").First(&siswa, "nis = ?", nisStr).Error; errSiswa != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"message": "Siswa tidak ditemukan",
 			})
 			return
 		}
 
-		// Get jadwal info
-		var jadwal models.JadwalSholat
-		if errJadwal := db.First(&jadwal, "id_jadwal = ?", idJadwal).Error; errJadwal != nil {
+		// Get template info
+		var template models.JadwalSholatTemplate
+		if errTemplate := db.Preload("JenisRef").First(&template, "id_template = ?", idTemplate).Error; errTemplate != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"message": "Jadwal sholat tidak ditemukan",
 			})
 			return
 		}
 
-		// Check if already absent today for this jadwal
+		// Get active semester for today
+		var semester models.SemesterAkademik
+		if errSem := db.Where("berlaku_mulai <= ? AND berlaku_sampai >= ?", today, today).First(&semester).Error; errSem != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"message": "Semester akademik tidak ditemukan untuk tanggal hari ini",
+			})
+			return
+		}
+
+		// Check if already absent today for this template
 		var existingAbsensi models.Absensi
-		err = db.Where("id_siswa = ? AND id_jadwal = ? AND DATE(tanggal) = ?", siswa.IDSiswa, idJadwal, today).
+		err = db.Where("id_siswa = ? AND id_template = ? AND DATE(tanggal) = ?", siswa.IDSiswa, idTemplate, today).
 			First(&existingAbsensi).Error
 
+		jenisSholatName := ""
+		if template.JenisRef != nil {
+			jenisSholatName = template.JenisRef.NamaJenis
+		}
+
 		if err == nil {
+			kelasStr := ""
+			if siswa.KelasRef != nil {
+				kelasStr = strconv.Itoa(siswa.KelasRef.Tingkatan) + siswa.KelasRef.Part
+			}
+			jurusanStr := ""
+			if siswa.KelasRef != nil {
+				jurusanStr = siswa.KelasRef.Jurusan
+			}
 			c.JSON(http.StatusConflict, gin.H{
-				"message": fmt.Sprintf("Anda sudah absen untuk %s hari ini", jadwal.JenisSholat),
+				"message": fmt.Sprintf("Anda sudah absen untuk %s hari ini", jenisSholatName),
 				"data": VerifyQRData{
 					Valid:       false,
 					NIS:         siswa.NIS,
 					NamaSiswa:   siswa.NamaSiswa,
-					Kelas:       siswa.Kelas,
-					Jurusan:     siswa.Jurusan,
-					JenisSholat: jadwal.JenisSholat,
+					Kelas:       kelasStr,
+					Jurusan:     jurusanStr,
+					JenisSholat: jenisSholatName,
 					Tanggal:     today,
 					Status:      existingAbsensi.Status,
 				},
@@ -345,6 +390,15 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		if err != nil {
 			logger.Errorw("Failed to parse today's date", "error", err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Kesalahan internal (tanggal)"})
+			return
+		}
+		absensi := models.Absensi{
+			IDSiswa:    siswa.IDSiswa,
+			IDSemester: semester.IDSemester,
+			IDTemplate: idTemplate,
+			Tanggal:    tanggal,
+			Status:     "hadir",
+		}
 			return
 		}
 		absensi := models.Absensi{

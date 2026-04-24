@@ -14,8 +14,7 @@ import (
 )
 
 type StatisticsResponse struct {
-	Message string         `json:"message"`
-	Data    StatisticsData `json:"data"`
+	Data StatisticsData `json:"data"`
 }
 
 type StatisticsData struct {
@@ -51,41 +50,45 @@ func GetStatistics(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		var response StatisticsResponse
 		cache := utils.GetCache()
 
-		// Role-based filtering for Wali Kelas (handle variations)
+		// Role-based filtering for Wali Kelas
 		role, _ := c.Get("role")
-		var kelasFilter string
-		if role != nil {
-			roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
-			if roleStr == "wali_kelas" {
-				nip, _ := c.Get("nip")
-				if nip != nil {
-					if info, err := resolveWaliKelasInfo(db, nip.(string)); err == nil {
-						kelasFilter = waliKelasLabel(info)
-						cacheKey += ":" + kelasFilter
-					}
+		var kelasIDFilter *int
+		if role != nil && role.(string) == "guru" {
+			// Check if guru is wali_kelas
+			nip, _ := c.Get("nip")
+			if nip != nil {
+				var wali models.WaliKelas
+				if err := db.Where("id_staff = (SELECT id_staff FROM staff WHERE nip = ?) AND is_active = true", nip.(string)).First(&wali).Error; err == nil {
+					kelasIDFilter = &wali.IDKelas
+					cacheKey += ":" + string(rune(wali.IDKelas))
 				}
 			}
 		}
 
 		// Try to get from cache first, or compute if not cached
 		err := cache.GetOrSet(ctx, cacheKey, &response, utils.CacheTTLStatistics, func() (interface{}, error) {
-			return computeStatistics(db, logger, kelasFilter)
+			return computeStatistics(db, logger, kelasIDFilter)
 		})
 
 		if err != nil {
 			logger.Errorw("Failed to get statistics", "error", err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Gagal mengambil statistik",
+				"error": gin.H{
+					"code": "INTERNAL_ERROR",
+					"message": "Gagal mengambil statistik",
+				},
 			})
 			return
 		}
 
-		c.JSON(http.StatusOK, response)
+		c.JSON(http.StatusOK, gin.H{
+			"data": response.Data,
+		})
 	}
 }
 
 // computeStatistics calculates statistics data using optimized queries
-func computeStatistics(db *gorm.DB, logger *zap.SugaredLogger, kelas string) (StatisticsResponse, error) {
+func computeStatistics(db *gorm.DB, logger *zap.SugaredLogger, kelasID *int) (StatisticsResponse, error) {
 	today := utils.GetJakartaDateString()
 
 	// Use a single raw query to get all statistics including izin/sakit breakdown
@@ -105,44 +108,44 @@ func computeStatistics(db *gorm.DB, logger *zap.SugaredLogger, kelas string) (St
 	var query string
 	var args []interface{}
 
-	if kelas != "" {
+	if kelasID != nil {
 		// Filtered by class for Wali Kelas
 		query = `
-			SELECT 
-				(SELECT COUNT(*) FROM siswa s JOIN kelas k ON s.id_kelas = k.id_kelas WHERE s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) as total_siswa,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ?) as today_total,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'hadir') as today_hadir,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'izin') as today_izin,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) = 'sakit') as today_sakit,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) NOT IN ('hadir')) as today_tidak_hadir,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND DATE(a.tanggal) = ? AND LOWER(TRIM(a.status)) IN ('alpha','alpa')) as today_alpha,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?)) as all_time_total,
-				(SELECT COUNT(*) FROM absensi a JOIN siswa s ON a.id_siswa = s.id_siswa JOIN kelas k ON s.id_kelas = k.id_kelas WHERE (s.kelas = ? OR CONCAT(CAST(k.tingkatan AS TEXT), k.part) = ?) AND LOWER(TRIM(a.status)) = 'hadir') as all_time_hadir
+			SELECT
+				(SELECT COUNT(*) FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) as total_siswa,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) AND DATE(tanggal) = ?) as today_total,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) AND DATE(tanggal) = ? AND status = 'hadir') as today_hadir,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) AND DATE(tanggal) = ? AND status = 'izin') as today_izin,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) AND DATE(tanggal) = ? AND status = 'sakit') as today_sakit,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) AND DATE(tanggal) = ? AND status != 'hadir') as today_tidak_hadir,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) AND DATE(tanggal) = ? AND status = 'alpha') as today_alpha,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL)) as all_time_total,
+				(SELECT COUNT(*) FROM absensi WHERE id_siswa IN (SELECT id_siswa FROM siswa WHERE id_kelas = ? AND deleted_at IS NULL) AND status = 'hadir') as all_time_hadir
 		`
 		args = []interface{}{
-			kelas, kelas,
-			kelas, kelas, today,
-			kelas, kelas, today,
-			kelas, kelas, today,
-			kelas, kelas, today,
-			kelas, kelas, today,
-			kelas, kelas, today,
-			kelas, kelas,
-			kelas, kelas,
+			*kelasID,
+			*kelasID, today,
+			*kelasID, today,
+			*kelasID, today,
+			*kelasID, today,
+			*kelasID, today,
+			*kelasID, today,
+			*kelasID,
+			*kelasID,
 		}
 	} else {
 		// Global stats for Admin
 		query = `
-			SELECT 
-				(SELECT COUNT(*) FROM siswa) as total_siswa,
+			SELECT
+				(SELECT COUNT(*) FROM siswa WHERE deleted_at IS NULL) as total_siswa,
 				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ?) as today_total,
-				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'hadir') as today_hadir,
-				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'izin') as today_izin,
-				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) = 'sakit') as today_sakit,
-				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) NOT IN ('hadir')) as today_tidak_hadir,
-				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND LOWER(TRIM(status)) IN ('alpha','alpa')) as today_alpha,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND status = 'hadir') as today_hadir,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND status = 'izin') as today_izin,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND status = 'sakit') as today_sakit,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND status != 'hadir') as today_tidak_hadir,
+				(SELECT COUNT(*) FROM absensi WHERE DATE(tanggal) = ? AND status = 'alpha') as today_alpha,
 				(SELECT COUNT(*) FROM absensi) as all_time_total,
-				(SELECT COUNT(*) FROM absensi WHERE LOWER(TRIM(status)) = 'hadir') as all_time_hadir
+				(SELECT COUNT(*) FROM absensi WHERE status = 'hadir') as all_time_hadir
 		`
 		args = []interface{}{today, today, today, today, today, today}
 	}

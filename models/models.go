@@ -5,133 +5,182 @@ import (
 )
 
 type Account struct {
-	ID        int       `gorm:"primaryKey;column:id" json:"id"`
-	Email     string    `gorm:"column:email;size:255;not null;unique" json:"email"`
-	Password  string    `gorm:"column:password;size:255;not null" json:"-"`
-	Role      string    `gorm:"column:role;size:20;not null" json:"role"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	ID        int        `gorm:"primaryKey;column:id" json:"id"`
+	Email     string     `gorm:"column:email;size:255;not null;unique" json:"email"`
+	Password  string     `gorm:"column:password;size:255;not null" json:"-"`
+	Role      string     `gorm:"column:role;size:20;not null" json:"role"`
+	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	DeletedAt *time.Time `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
 }
 
 func (Account) TableName() string {
 	return "accounts"
 }
 
-type Kelas struct {
-	IDKelas    int    `gorm:"primaryKey;column:id_kelas" json:"id_kelas"`
-	Tingkatan  int    `gorm:"column:tingkatan;not null" json:"tingkatan"`
-	Jurusan    string `gorm:"column:jurusan;size:20;not null" json:"jurusan"`
-	Part       string `gorm:"column:part;size:3;not null" json:"part"`
-}
-
-func (Kelas) TableName() string {
-	return "kelas"
-}
-
-type Siswa struct {
-	IDSiswa         int        `gorm:"primaryKey;column:id_siswa" json:"id_siswa"`
-	IDAccount       int        `gorm:"column:id_account;not null" json:"id_account"`
-	NIS             string     `gorm:"column:nis;size:20;not null;unique" json:"nis"`
-	NamaSiswa       string     `gorm:"column:nama_siswa;not null" json:"nama_siswa"`
-	JK              string     `gorm:"column:jk;type:char(1);not null" json:"jk"`
-	IDKelas         *int       `gorm:"column:id_kelas" json:"id_kelas"`
-	AcademicYear    *string    `gorm:"column:academic_year;size:9" json:"academic_year,omitempty"`
-	ClassStatus     string     `gorm:"column:class_status;default:'active'" json:"class_status"`
-	LastPromotionAt *time.Time `gorm:"column:last_promotion_at" json:"last_promotion_at,omitempty"`
-	Account         *Account   `gorm:"foreignKey:IDAccount;references:ID" json:"-"`
-	KelasRef        *Kelas     `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
-}
-
-func (Siswa) TableName() string {
-	return "siswa"
-}
-
-type JadwalSholat struct {
-	IDJadwal     int       `gorm:"primaryKey;column:id_jadwal" json:"id_jadwal"`
-	IDKelas      int       `gorm:"column:id_kelas;not null" json:"id_kelas"`
-	Hari         string    `gorm:"column:hari;not null" json:"hari"`
-	JenisSholat  string    `gorm:"column:jenis_sholat;not null" json:"jenis_sholat"`
-	WaktuMulai   string    `gorm:"column:waktu_mulai;type:time;not null" json:"waktu_mulai"`
-	WaktuSelesai string    `gorm:"column:waktu_selesai;type:time;not null" json:"waktu_selesai"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	KelasRef     *Kelas    `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
-}
-
-func (JadwalSholat) TableName() string {
-	return "jadwal_sholat"
-}
-
-type Absensi struct {
-	IDAbsen   int       `gorm:"primaryKey;column:id_absen" json:"id_absen"`
-	IDJadwal  int       `gorm:"column:id_jadwal;not null" json:"id_jadwal"`
-	IDSiswa   int       `gorm:"column:id_siswa;not null" json:"id_siswa"`
-	Tanggal   time.Time `gorm:"column:tanggal;type:date;not null" json:"tanggal"`
-	Status    string    `gorm:"column:status;not null" json:"status"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	Siswa     *Siswa    `gorm:"foreignKey:IDSiswa;references:IDSiswa" json:"siswa,omitempty"`
-	Jadwal    *JadwalSholat `gorm:"foreignKey:IDJadwal;references:IDJadwal" json:"jadwal,omitempty"`
-}
-
-func (Absensi) TableName() string {
-	return "absensi"
-}
-
 type Staff struct {
-	IDStaff   int       `gorm:"primaryKey;column:id_staff" json:"id_staff"`
-	IDAccount int       `gorm:"column:id_account;not null;unique" json:"id_account"`
-	NIP       string    `gorm:"column:nip;size:20" json:"nip,omitempty"`
-	Nama      string    `gorm:"column:nama;size:255;not null" json:"nama"`
-	TipeStaff string    `gorm:"column:tipe_staff;size:10;not null" json:"tipe_staff"`
-	Account   *Account  `gorm:"foreignKey:IDAccount;references:ID" json:"-"`
+	IDStaff   int        `gorm:"primaryKey;column:id_staff" json:"id_staff"`
+	IDAccount int        `gorm:"column:id_account;not null;unique" json:"id_account"`
+	NIP       *string    `gorm:"column:nip;size:20;unique" json:"nip,omitempty"`
+	Nama      string     `gorm:"column:nama;size:255;not null" json:"nama"`
+	TipeStaff string     `gorm:"column:tipe_staff;size:10;not null" json:"tipe_staff"`
+	DeletedAt *time.Time `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
+	Account   *Account   `gorm:"foreignKey:IDAccount;references:ID" json:"-"`
 }
 
 func (Staff) TableName() string {
 	return "staff"
 }
 
+type Siswa struct {
+	IDSiswa         int        `gorm:"primaryKey;column:id_siswa" json:"id_siswa"`
+	IDAccount       int        `gorm:"column:id_account;not null;unique" json:"id_account"`
+	NIS             string     `gorm:"column:nis;size:20;not null;unique" json:"nis"`
+	NamaSiswa       string     `gorm:"column:nama_siswa;not null" json:"nama_siswa"`
+	JK              string     `gorm:"column:jk;type:char(1);not null" json:"jk"`
+	IDKelas         *int       `gorm:"column:id_kelas" json:"id_kelas,omitempty"`
+	IDTahunMasuk    *int       `gorm:"column:id_tahun_masuk" json:"id_tahun_masuk,omitempty"`
+	ClassStatus     string     `gorm:"column:class_status;default:'active'" json:"class_status"`
+	LastPromotionAt *time.Time `gorm:"column:last_promotion_at" json:"last_promotion_at,omitempty"`
+	DeletedAt       *time.Time `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
+	Account         *Account   `gorm:"foreignKey:IDAccount;references:ID" json:"-"`
+	Kelas           *Kelas     `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
+	TahunMasuk      *TahunMasuk `gorm:"foreignKey:IDTahunMasuk;references:IDTahunMasuk" json:"-"`
+}
+
+func (Siswa) TableName() string {
+	return "siswa"
+}
+
+type Kelas struct {
+	IDKelas   int        `gorm:"primaryKey;column:id_kelas" json:"id_kelas"`
+	Tingkatan int        `gorm:"column:tingkatan;not null" json:"tingkatan"`
+	Jurusan   string     `gorm:"column:jurusan;size:20;not null" json:"jurusan"`
+	Part      string     `gorm:"column:part;size:3;not null" json:"part"`
+	DeletedAt *time.Time `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
+}
+
+func (Kelas) TableName() string {
+	return "kelas"
+}
+
 type WaliKelas struct {
-	IDWali   int    `gorm:"primaryKey;column:id_wali" json:"id_wali"`
-	IDKelas  int    `gorm:"column:id_kelas;not null;unique" json:"id_kelas"`
-	IDStaff  int    `gorm:"column:id_staff;not null" json:"id_staff"`
-	KelasRef *Kelas `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
-	StaffRef *Staff `gorm:"foreignKey:IDStaff;references:IDStaff" json:"-"`
+	IDWali      int       `gorm:"primaryKey;column:id_wali" json:"id_wali"`
+	IDKelas     int       `gorm:"column:id_kelas;not null;unique" json:"id_kelas"`
+	IDStaff     int       `gorm:"column:id_staff;not null" json:"id_staff"`
+	IsActive    bool      `gorm:"column:is_active;not null" json:"is_active"`
+	BerlakuMulai time.Time `gorm:"column:berlaku_mulai;type:date;not null" json:"berlaku_mulai"`
+	Kelas       *Kelas    `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`
+	Staff       *Staff    `gorm:"foreignKey:IDStaff;references:IDStaff" json:"-"`
 }
 
 func (WaliKelas) TableName() string {
 	return "wali_kelas"
 }
 
-type StudentClassTransition struct {
-	ID               int       `gorm:"primaryKey;column:id" json:"id"`
-	IDSiswa          int       `gorm:"column:id_siswa;not null" json:"id_siswa"`
-	Action           string    `gorm:"column:action;size:30;not null" json:"action"`
-	FromClass        *int      `gorm:"column:from_class" json:"from_class,omitempty"`
-	ToClass          *int      `gorm:"column:to_class" json:"to_class,omitempty"`
-	FromAcademicYear *string   `gorm:"column:from_academic_year;size:9" json:"from_academic_year,omitempty"`
-	ToAcademicYear   *string   `gorm:"column:to_academic_year;size:9" json:"to_academic_year,omitempty"`
-	FromSemester     *int      `gorm:"column:from_semester" json:"from_semester,omitempty"`
-	ToSemester       *int      `gorm:"column:to_semester" json:"to_semester,omitempty"`
-	FromStatus       *string   `gorm:"column:from_status;size:20" json:"from_status,omitempty"`
-	ToStatus         *string   `gorm:"column:to_status;size:20" json:"to_status,omitempty"`
-	DecidedBy        *int      `gorm:"column:decided_by" json:"decided_by,omitempty"`
-	Note             *string   `gorm:"column:note" json:"note,omitempty"`
-	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+type TahunMasuk struct {
+	IDTahunMasuk int       `gorm:"primaryKey;column:id_tahun_masuk" json:"id_tahun_masuk"`
+	Tahun        string    `gorm:"column:tahun;size:9;not null;unique" json:"tahun"`
+	IsActive     bool      `gorm:"column:is_active;not null" json:"is_active"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 }
 
-func (StudentClassTransition) TableName() string {
-	return "student_class_transitions"
+func (TahunMasuk) TableName() string {
+	return "tahun_masuk"
 }
 
-type RefreshToken struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	AccountID int       `gorm:"column:account_id;not null" json:"account_id"`
-	Token     string    `gorm:"uniqueIndex:idx_token;not null" json:"token"`
-	ExpiresAt time.Time `gorm:"not null" json:"expires_at"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+type SemesterAkademik struct {
+	IDSemester    int       `gorm:"primaryKey;column:id_semester" json:"id_semester"`
+	IDTahun       int       `gorm:"column:id_tahun;not null" json:"id_tahun"`
+	Semester      int       `gorm:"column:semester;not null" json:"semester"`
+	TanggalMulai  time.Time `gorm:"column:tanggal_mulai;type:date;not null" json:"tanggal_mulai"`
+	TanggalSelesai time.Time `gorm:"column:tanggal_selesai;type:date;not null" json:"tanggal_selesai"`
+	TahunMasuk    *TahunMasuk `gorm:"foreignKey:IDTahun;references:IDTahunMasuk" json:"-"`
 }
 
-func (RefreshToken) TableName() string {
-	return "refresh_tokens"
+func (SemesterAkademik) TableName() string {
+	return "semester_akademik"
+}
+
+type JenisSholat struct {
+	IDJenis      int    `gorm:"primaryKey;column:id_jenis" json:"id_jenis"`
+	NamaJenis    string `gorm:"column:nama_jenis;size:30;not null" json:"nama_jenis"`
+	ButuhGiliran bool   `gorm:"column:butuh_giliran;not null" json:"butuh_giliran"`
+}
+
+func (JenisSholat) TableName() string {
+	return "jenis_sholat"
+}
+
+type JadwalSholatTemplate struct {
+	IDTemplate int          `gorm:"primaryKey;column:id_template" json:"id_template"`
+	Hari       string       `gorm:"column:hari;size:10;not null" json:"hari"`
+	IDJenis    int          `gorm:"column:id_jenis;not null" json:"id_jenis"`
+	JenisSholat *JenisSholat `gorm:"foreignKey:IDJenis;references:IDJenis" json:"-"`
+}
+
+func (JadwalSholatTemplate) TableName() string {
+	return "jadwal_sholat_template"
+}
+
+type GiliranDhuha struct {
+	IDGiliran int    `gorm:"primaryKey;column:id_giliran" json:"id_giliran"`
+	Jurusan   string `gorm:"column:jurusan;size:20;not null" json:"jurusan"`
+	Hari      string `gorm:"column:hari;size:10;not null" json:"hari"`
+}
+
+func (GiliranDhuha) TableName() string {
+	return "giliran_dhuha"
+}
+
+type WaktuSholat struct {
+	IDWaktu       int        `gorm:"primaryKey;column:id_waktu" json:"id_waktu"`
+	IDJenis       int        `gorm:"column:id_jenis;not null" json:"id_jenis"`
+	WaktuMulai    string     `gorm:"column:waktu_mulai;type:time;not null" json:"waktu_mulai"`
+	WaktuSelesai  string     `gorm:"column:waktu_selesai;type:time;not null" json:"waktu_selesai"`
+	BerlakuMulai  time.Time  `gorm:"column:berlaku_mulai;type:date;not null" json:"berlaku_mulai"`
+	BerlakuSampai *time.Time `gorm:"column:berlaku_sampai;type:date" json:"berlaku_sampai,omitempty"`
+	JenisSholat   *JenisSholat `gorm:"foreignKey:IDJenis;references:IDJenis" json:"-"`
+}
+
+func (WaktuSholat) TableName() string {
+	return "waktu_sholat"
+}
+
+type Absensi struct {
+	IDAbsen    int                   `gorm:"primaryKey;column:id_absen" json:"id_absen"`
+	IDSiswa    int                   `gorm:"column:id_siswa;not null" json:"id_siswa"`
+	IDSemester int                   `gorm:"column:id_semester;not null" json:"id_semester"`
+	IDTemplate int                   `gorm:"column:id_template;not null" json:"id_template"`
+	IDGiliran  *int                  `gorm:"column:id_giliran" json:"id_giliran,omitempty"`
+	Tanggal    time.Time             `gorm:"column:tanggal;type:date;not null" json:"tanggal"`
+	Status     string                `gorm:"column:status;not null" json:"status"`
+	Siswa      *Siswa                `gorm:"foreignKey:IDSiswa;references:IDSiswa" json:"siswa,omitempty"`
+	Semester   *SemesterAkademik     `gorm:"foreignKey:IDSemester;references:IDSemester" json:"semester,omitempty"`
+	Template   *JadwalSholatTemplate `gorm:"foreignKey:IDTemplate;references:IDTemplate" json:"template,omitempty"`
+	Giliran    *GiliranDhuha         `gorm:"foreignKey:IDGiliran;references:IDGiliran" json:"giliran,omitempty"`
+}
+
+func (Absensi) TableName() string {
+	return "absensi"
+}
+
+type RekapAbsensi struct {
+	IDRekap      int             `gorm:"primaryKey;column:id_rekap" json:"id_rekap"`
+	IDSiswa      int             `gorm:"column:id_siswa;not null" json:"id_siswa"`
+	IDSemester   int             `gorm:"column:id_semester;not null" json:"id_semester"`
+	IDJenis      int             `gorm:"column:id_jenis;not null" json:"id_jenis"`
+	JumlahHadir  int             `gorm:"column:jumlah_hadir;default:0;not null" json:"jumlah_hadir"`
+	JumlahIzin   int             `gorm:"column:jumlah_izin;default:0;not null" json:"jumlah_izin"`
+	JumlahSakit  int             `gorm:"column:jumlah_sakit;default:0;not null" json:"jumlah_sakit"`
+	JumlahAlpha  int             `gorm:"column:jumlah_alpha;default:0;not null" json:"jumlah_alpha"`
+	Siswa        *Siswa          `gorm:"foreignKey:IDSiswa;references:IDSiswa" json:"siswa,omitempty"`
+	Semester     *SemesterAkademik `gorm:"foreignKey:IDSemester;references:IDSemester" json:"semester,omitempty"`
+	JenisSholat  *JenisSholat    `gorm:"foreignKey:IDJenis;references:IDJenis" json:"jenis_sholat,omitempty"`
+}
+
+func (RekapAbsensi) TableName() string {
+	return "rekap_absensi"
 }
 
 // Legacy transition models retained to keep old call sites compiling.

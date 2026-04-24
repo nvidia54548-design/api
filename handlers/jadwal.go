@@ -12,56 +12,33 @@ import (
 	"absensholat-api/utils"
 )
 
-// JadwalSholatFilterRequest represents query parameters for filtering jadwal sholat
-type JadwalSholatFilterRequest struct {
+// JadwalSholatTemplateFilterRequest represents query parameters for filtering jadwal sholat template
+type JadwalSholatTemplateFilterRequest struct {
 	Hari        string `form:"hari"`         // Filter by hari
-	JenisSholat string `form:"jenis_sholat"` // Filter by jenis sholat
-	Jurusan     string `form:"jurusan"`      // Filter by jurusan
+	IDJenis     int    `form:"id_jenis"`     // Filter by id_jenis
 	Page        int    `form:"page"`         // Page number (1-based)
 	PageSize    int    `form:"page_size"`    // Items per page
-	SortBy      string `form:"sort_by"`      // Sort field: id_jadwal, hari, jenis_sholat, waktu_mulai
+	SortBy      string `form:"sort_by"`      // Sort field: id_template, hari
 	SortDir     string `form:"sort_dir"`     // Sort direction: asc, desc
 }
 
-type JadwalSholatListResponse struct {
-	Message string                `json:"message"`
-	Data    []models.JadwalSholat `json:"data"`
+type JadwalSholatTemplateListResponse struct {
+	Data []models.JadwalSholatTemplate `json:"data"`
+	Meta gin.H                         `json:"meta"`
 }
 
-type JadwalSholatListPaginatedResponse struct {
-	Message    string                `json:"message"`
-	Data       []models.JadwalSholat `json:"data"`
-	Pagination PaginationMeta        `json:"pagination"`
-	Filters    JadwalSholatFilters   `json:"filters"`
+type JadwalSholatTemplateResponse struct {
+	Data models.JadwalSholatTemplate `json:"data"`
 }
 
-type JadwalSholatFilters struct {
-	Hari        string `json:"hari,omitempty"`
-	JenisSholat string `json:"jenis_sholat,omitempty"`
-	Jurusan     string `json:"jurusan,omitempty"`
+type JadwalSholatTemplateCreateRequest struct {
+	Hari    string `json:"hari" binding:"required"`
+	IDJenis int    `json:"id_jenis" binding:"required"`
 }
 
-type JadwalSholatResponse struct {
-	Message string              `json:"message"`
-	Data    models.JadwalSholat `json:"data"`
-}
-
-type JadwalSholatCreateRequest struct {
-	Hari         string `json:"hari" binding:"required"`
-	JenisSholat  string `json:"jenis_sholat" binding:"required"`
-	WaktuMulai   string `json:"waktu_mulai" binding:"required"`
-	WaktuSelesai string `json:"waktu_selesai" binding:"required"`
-	Jurusan      string `json:"jurusan"`
-	Kelas        string `json:"kelas"`
-}
-
-type JadwalSholatUpdateRequest struct {
-	Hari         string `json:"hari"`
-	JenisSholat  string `json:"jenis_sholat"`
-	WaktuMulai   string `json:"waktu_mulai"`
-	WaktuSelesai string `json:"waktu_selesai"`
-	Jurusan      string `json:"jurusan"`
-	Kelas        string `json:"kelas"`
+type JadwalSholatTemplateUpdateRequest struct {
+	Hari    string `json:"hari"`
+	IDJenis int    `json:"id_jenis"`
 }
 
 type JadwalSholatErrorResponse struct {
@@ -171,12 +148,15 @@ func GetJadwalDhuhaToday(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc
 // @Router /jadwal-sholat [get]
 func GetJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req JadwalSholatFilterRequest
+		var req JadwalSholatTemplateFilterRequest
 		if err := c.ShouldBindQuery(&req); err != nil {
 			logger.Error("Invalid query parameters", "error", err)
-			c.JSON(http.StatusBadRequest, JadwalSholatErrorResponse{
-				Error:   "INVALID_REQUEST",
-				Message: "Invalid query parameters",
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code": "VALIDATION_ERROR",
+					"message": "Invalid query parameters",
+					"details": []string{err.Error()},
+				},
 			})
 			return
 		}
@@ -189,7 +169,7 @@ func GetJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			req.PageSize = 10
 		}
 		if req.SortBy == "" {
-			req.SortBy = "id_jadwal"
+			req.SortBy = "id_template"
 		}
 		if req.SortDir == "" {
 			req.SortDir = "asc"
@@ -197,75 +177,65 @@ func GetJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 
 		// Validate sort field
 		validSortFields := map[string]bool{
-			"id_jadwal": true, "hari": true, "jenis_sholat": true, "waktu_mulai": true,
+			"id_template": true, "hari": true,
 		}
 		if !validSortFields[req.SortBy] {
-			req.SortBy = "id_jadwal"
+			req.SortBy = "id_template"
 		}
 		if req.SortDir != "asc" && req.SortDir != "desc" {
 			req.SortDir = "asc"
 		}
 
-		var jadwalSholat []models.JadwalSholat
+		var templates []models.JadwalSholatTemplate
 		var totalItems int64
 
-		query := db.Model(&models.JadwalSholat{})
+		query := db.Model(&models.JadwalSholatTemplate{}).Preload("JenisSholat")
 
 		// Apply filters
 		if req.Hari != "" {
-			// If searching for a specific day, we need to find exact matches
-			// AND ranges that include that day
-			query = query.Where("hari = ? OR hari = 'Senin-Minggu' OR hari = 'Semua Hari' OR (hari = 'Senin-Jumat' AND ? NOT IN ('Sabtu', 'Minggu')) OR (hari = 'Senin-Kamis' AND ? NOT IN ('Jumat', 'Sabtu', 'Minggu'))", req.Hari, req.Hari, req.Hari)
+			query = query.Where("hari = ?", req.Hari)
 		}
-		if req.JenisSholat != "" {
-			query = query.Where("jenis_sholat = ?", req.JenisSholat)
+		if req.IDJenis > 0 {
+			query = query.Where("id_jenis = ?", req.IDJenis)
 		}
-		if req.Jurusan != "" {
 			query = query.Where("jurusan = ?", req.Jurusan)
 		}
 
 		// Get total count
 		if err := query.Count(&totalItems).Error; err != nil {
-			logger.Error("Failed to count jadwal sholat", "error", err)
-			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
-				Error:   "DATABASE_ERROR",
-				Message: "Failed to retrieve jadwal sholat count",
+			logger.Error("Failed to count jadwal sholat templates", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"code": "INTERNAL_ERROR",
+					"message": "Failed to retrieve jadwal sholat template count",
+				},
 			})
 			return
 		}
 
 		// Calculate pagination
 		offset := (req.Page - 1) * req.PageSize
-		totalPages := int((totalItems + int64(req.PageSize) - 1) / int64(req.PageSize))
 
 		// Apply sorting and pagination
 		order := req.SortBy + " " + req.SortDir
-		if err := query.Order(order).Offset(offset).Limit(req.PageSize).Find(&jadwalSholat).Error; err != nil {
-			logger.Error("Failed to retrieve jadwal sholat", "error", err)
-			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
-				Error:   "DATABASE_ERROR",
-				Message: "Failed to retrieve jadwal sholat",
+		if err := query.Order(order).Offset(offset).Limit(req.PageSize).Find(&templates).Error; err != nil {
+			logger.Error("Failed to retrieve jadwal sholat templates", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"code": "INTERNAL_ERROR",
+					"message": "Failed to retrieve jadwal sholat templates",
+				},
 			})
 			return
 		}
 
-		// Build applied filters
-		filters := JadwalSholatFilters{
-			Hari:        req.Hari,
-			JenisSholat: req.JenisSholat,
-			Jurusan:     req.Jurusan,
-		}
-
-		c.JSON(http.StatusOK, JadwalSholatListPaginatedResponse{
-			Message: "Jadwal sholat retrieved successfully",
-			Data:    jadwalSholat,
-			Pagination: PaginationMeta{
-				Page:       req.Page,
-				PageSize:   req.PageSize,
-				TotalItems: totalItems,
-				TotalPages: totalPages,
+		c.JSON(http.StatusOK, gin.H{
+			"data": templates,
+			"meta": gin.H{
+				"total": totalItems,
+				"page":  req.Page,
+				"limit": req.PageSize,
 			},
-			Filters: filters,
 		})
 	}
 }
@@ -288,35 +258,40 @@ func GetJadwalSholatByID(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc
 		idStr := c.Param("id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			logger.Error("Invalid jadwal sholat ID", "id", idStr, "error", err)
-			c.JSON(http.StatusBadRequest, JadwalSholatErrorResponse{
-				Error:   "INVALID_ID",
-				Message: "Invalid jadwal sholat ID",
+			logger.Error("Invalid jadwal sholat template ID", "id", idStr, "error", err)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code": "VALIDATION_ERROR",
+					"message": "Invalid jadwal sholat template ID",
+				},
 			})
 			return
 		}
 
-		var jadwal models.JadwalSholat
-		if err := db.First(&jadwal, "id_jadwal = ?", id).Error; err != nil {
+		var template models.JadwalSholatTemplate
+		if err := db.Preload("JenisSholat").First(&template, "id_template = ?", id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				logger.Warn("Jadwal sholat not found", "id", id)
-				c.JSON(http.StatusNotFound, JadwalSholatErrorResponse{
-					Error:   "NOT_FOUND",
-					Message: "Jadwal sholat not found",
+				logger.Warn("Jadwal sholat template not found", "id", id)
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": gin.H{
+						"code": "NOT_FOUND",
+						"message": "Jadwal sholat template not found",
+					},
 				})
 				return
 			}
-			logger.Error("Failed to retrieve jadwal sholat", "id", id, "error", err)
-			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
-				Error:   "DATABASE_ERROR",
-				Message: "Failed to retrieve jadwal sholat",
+			logger.Error("Failed to retrieve jadwal sholat template", "id", id, "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"code": "INTERNAL_ERROR",
+					"message": "Failed to retrieve jadwal sholat template",
+				},
 			})
 			return
 		}
 
-		c.JSON(http.StatusOK, JadwalSholatResponse{
-			Message: "Jadwal sholat retrieved successfully",
-			Data:    jadwal,
+		c.JSON(http.StatusOK, gin.H{
+			"data": template,
 		})
 	}
 }
@@ -335,38 +310,82 @@ func GetJadwalSholatByID(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc
 // @Router /jadwal-sholat [post]
 func CreateJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req JadwalSholatCreateRequest
+		var req JadwalSholatTemplateCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			logger.Error("Invalid request body", "error", err)
-			c.JSON(http.StatusBadRequest, JadwalSholatErrorResponse{
-				Error:   "INVALID_REQUEST",
-				Message: "Invalid request body",
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"code": "VALIDATION_ERROR",
+					"message": "Invalid request body",
+					"details": []string{err.Error()},
+				},
 			})
 			return
 		}
 
-		jadwal := models.JadwalSholat{
-			Hari:         req.Hari,
-			JenisSholat:  req.JenisSholat,
-			WaktuMulai:   req.WaktuMulai,
-			WaktuSelesai: req.WaktuSelesai,
-			Jurusan:      req.Jurusan,
-			Kelas:        req.Kelas,
-		}
-
-		if err := db.Create(&jadwal).Error; err != nil {
-			logger.Error("Failed to create jadwal sholat", "error", err)
-			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
-				Error:   "DATABASE_ERROR",
-				Message: "Failed to create jadwal sholat",
+		// Validate hari
+		validator := utils.NewValidator()
+		validator.Hari("hari", req.Hari)
+		if validator.HasErrors() {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"error": gin.H{
+					"code": "VALIDATION_ERROR",
+					"message": "Invalid hari",
+					"details": validator.Errors(),
+				},
 			})
 			return
 		}
 
-		logger.Info("Jadwal sholat created", "id", jadwal.IDJadwal)
-		c.JSON(http.StatusCreated, JadwalSholatResponse{
-			Message: "Jadwal sholat created successfully",
-			Data:    jadwal,
+		// Check if jenis exists
+		var jenis models.JenisSholat
+		if err := db.First(&jenis, "id_jenis = ?", req.IDJenis).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": gin.H{
+						"code": "NOT_FOUND",
+						"message": "Jenis sholat not found",
+					},
+				})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{
+					"code": "INTERNAL_ERROR",
+					"message": "Failed to check jenis sholat",
+				},
+			})
+			return
+		}
+
+		template := models.JadwalSholatTemplate{
+			Hari:    req.Hari,
+			IDJenis: req.IDJenis,
+		}
+
+		if err := db.Create(&template).Error; err != nil {
+			logger.Error("Failed to create jadwal sholat template", "error", err)
+			if strings.Contains(err.Error(), "duplicate") {
+				c.JSON(http.StatusConflict, gin.H{
+					"error": gin.H{
+						"code": "CONFLICT",
+						"message": "Template already exists for this hari and jenis",
+					},
+				})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": gin.H{
+						"code": "INTERNAL_ERROR",
+						"message": "Failed to create jadwal sholat template",
+					},
+				})
+			}
+			return
+		}
+
+		logger.Info("Jadwal sholat template created", "id", template.IDTemplate)
+		c.JSON(http.StatusCreated, gin.H{
+			"data": template,
 		})
 	}
 }
