@@ -139,10 +139,10 @@ func GetHistorySiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		// Get jadwal info for each absensi
 		var historyItems []AbsensiHistoryItem
 		for _, absensi := range absensiList {
-			var jadwal models.JadwalSholat
+			var template models.JadwalSholatTemplate
 			jenisSholat := ""
-			if err := db.First(&jadwal, "id_jadwal = ?", absensi.IDJadwal).Error; err == nil {
-				jenisSholat = jadwal.JenisSholat
+			if err := db.Preload("JenisSholat").First(&template, "id_template = ?", absensi.IDTemplate).Error; err == nil && template.JenisSholat != nil {
+				jenisSholat = template.JenisSholat.NamaJenis
 			}
 
 			// Get day name in Indonesian
@@ -499,10 +499,10 @@ func GetHistoryStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				}
 			}
 
-			var jadwal models.JadwalSholat
+			var template models.JadwalSholatTemplate
 			jenisSholat := ""
-			if err := db.First(&jadwal, "id_jadwal = ?", absensi.IDJadwal).Error; err == nil {
-				jenisSholat = jadwal.JenisSholat
+			if err := db.Preload("JenisSholat").First(&template, "id_template = ?", absensi.IDTemplate).Error; err == nil && template.JenisSholat != nil {
+				jenisSholat = template.JenisSholat.NamaJenis
 			}
 
 			hari := getHariName(absensi.Tanggal.Weekday())

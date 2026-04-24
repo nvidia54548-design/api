@@ -1633,25 +1633,25 @@ func ExportIntegratedReportExcel(db *gorm.DB, logger *zap.SugaredLogger) gin.Han
 			ActivePane:  "bottomLeft",
 		})
 
-		var weeklyJadwal []models.JadwalSholat
-		db.Where("jurusan = ? OR jurusan = 'Semua Jurusan' OR jurusan = ''", jurusan).Find(&weeklyJadwal)
-		jadwalMap := make(map[string][]models.JadwalSholat)
-		for _, j := range weeklyJadwal {
-			jadwalMap[j.Hari] = append(jadwalMap[j.Hari], j)
+		var weeklyTemplates []models.JadwalSholatTemplate
+		db.Preload("JenisSholat").Find(&weeklyTemplates)
+		templateMap := make(map[string][]models.JadwalSholatTemplate)
+		for _, t := range weeklyTemplates {
+			templateMap[t.Hari] = append(templateMap[t.Hari], t)
 		}
 
 		currDate := targetMonth
 		rIdx2 := 5
 		for currDate.Month() == targetMonth.Month() {
 			dayName := utils.GetIndonesianDayName(currDate)
-			dayJadwal := jadwalMap[dayName]
+			dayTemplates := templateMap[dayName]
 			dateStr := currDate.Format("02-01-2006")
-			for _, j := range dayJadwal {
+			for _, t := range dayTemplates {
 				f.SetCellValue(sheet2, fmt.Sprintf("A%d", rIdx2), dayName)
 				f.SetCellValue(sheet2, fmt.Sprintf("B%d", rIdx2), dateStr)
-				f.SetCellValue(sheet2, fmt.Sprintf("C%d", rIdx2), j.JenisSholat)
-				f.SetCellValue(sheet2, fmt.Sprintf("D%d", rIdx2), j.WaktuMulai)
-				f.SetCellValue(sheet2, fmt.Sprintf("E%d", rIdx2), j.WaktuSelesai)
+				f.SetCellValue(sheet2, fmt.Sprintf("C%d", rIdx2), t.JenisSholat.NamaJenis)
+				f.SetCellValue(sheet2, fmt.Sprintf("D%d", rIdx2), "-")
+				f.SetCellValue(sheet2, fmt.Sprintf("E%d", rIdx2), "-")
 				f.SetCellValue(sheet2, fmt.Sprintf("F%d", rIdx2), "-")
 				f.SetCellStyle(sheet2, fmt.Sprintf("A%d", rIdx2), fmt.Sprintf("F%d", rIdx2), dataStyle)
 				rIdx2++

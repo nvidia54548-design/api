@@ -17,8 +17,7 @@ type NotificationItem struct {
 	Kelas       string `json:"kelas"`
 	Jurusan     string `json:"jurusan"`
 	JenisSholat string `json:"jenis_sholat"`
-	WaktuMulai  string `json:"waktu_mulai"`
-	IDJadwal    int    `json:"id_jadwal"`
+	IDTemplate  int    `json:"id_template"`
 }
 
 type NotificationResponse struct {
@@ -50,38 +49,37 @@ func GetPendingNotifications(db *gorm.DB, logger *zap.SugaredLogger) gin.Handler
 		currentTime := now.Format("15:04:05")
 		today := now.Format("2006-01-02")
 
-		// Find prayers that have started (waktu_mulai <= now)
-		var activePrayers []models.JadwalSholat
-		if filterErr := db.Where("hari = ? AND waktu_mulai <= ?",
-			currentDay, currentTime).
-			Find(&activePrayers).Error; filterErr != nil {
-			logger.Errorw("Failed to fetch active prayers", "error", filterErr.Error())
+		// Find prayer templates for current day
+		var templates []models.JadwalSholatTemplate
+		if filterErr := db.Preload("JenisSholat").Where("hari = ?", currentDay).
+			Find(&templates).Error; filterErr != nil {
+			logger.Errorw("Failed to fetch prayer templates", "error", filterErr.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Gagal mengambil data jadwal",
+				"message": "Gagal mengambil data template jadwal",
 			})
 			return
 		}
 
-		if len(activePrayers) == 0 {
+		if len(templates) == 0 {
 			c.JSON(http.StatusOK, NotificationResponse{
-				Message: "Tidak ada jadwal sholat aktif",
+				Message: "Tidak ada template jadwal sholat untuk hari ini",
 				Data:    []NotificationItem{},
 				Count:   0,
 			})
 			return
 		}
 
-		// Get prayer IDs
-		prayerIDs := make([]int, len(activePrayers))
-		prayerMap := make(map[int]models.JadwalSholat)
-		for i, p := range activePrayers {
-			prayerIDs[i] = p.IDJadwal
-			prayerMap[p.IDJadwal] = p
+		// Get template IDs
+		templateIDs := make([]int, len(templates))
+		templateMap := make(map[int]models.JadwalSholatTemplate)
+		for i, t := range templates {
+			templateIDs[i] = t.IDTemplate
+			templateMap[t.IDTemplate] = t
 		}
 
-		// Get all students
+		// Get all students with kelas info
 		var students []models.Siswa
-		if findErr := db.Find(&students).Error; findErr != nil {
+		if findErr := db.Preload("KelasRef").Where("deleted_at IS NULL").Find(&students).Error; findErr != nil {
 			logger.Errorw("Failed to fetch students", "error", findErr.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": "Gagal mengambil data siswa",
@@ -99,36 +97,54 @@ func GetPendingNotifications(db *gorm.DB, logger *zap.SugaredLogger) gin.Handler
 			return
 		}
 		var existingRecords []models.Absensi
-		db.Where("tanggal = ? AND id_jadwal IN (?)", tanggal, prayerIDs).Find(&existingRecords)
+		db.Where("tanggal = ? AND id_template IN (?)", tanggal, templateIDs).Find(&existingRecords)
 
-		existingMap := make(map[string]bool)
-		for _, r := range existingRecords {
-			key := r.NIS + "-" + string(rune(r.IDJadwal))
-			existingMap[key] = true
-		}
-
-		// Use a more reliable key format
-		existingSet := make(map[string]bool)
-		for _, r := range existingRecords {
-			existingSet[r.NIS+"|"+time.Time(r.Tanggal).Format("2006-01-02")+"|"+string(rune(r.IDJadwal))] = true
-		}
-
-		// Simplified: just use NIS-IDJadwal
+		// Map of attended: NIS-TemplateID
 		attended := make(map[string]bool)
 		for _, r := range existingRecords {
-			attended[r.NIS+"-"+itoa(r.IDJadwal)] = true
+			attended[r.NIS+"-"+strconv.Itoa(r.IDTemplate)] = true
 		}
 
 		var notifications []NotificationItem
-		for _, prayer := range activePrayers {
+		for _, template := range templates {
 			for _, student := range students {
-				key := student.NIS + "-" + itoa(prayer.IDJadwal)
-				if !attended[key] {
-					// Filter Dhuha by jurusan
-					if prayer.JenisSholat == "Dhuha" && prayer.Jurusan != "" && prayer.Jurusan != "Semua Jurusan" {
-						if student.Jurusan != prayer.Jurusan {
-							continue
-						}
+				// Skip if already attended
+				if attended[student.NIS+"-"+strconv.Itoa(template.IDTemplate)] {
+					continue
+				}
+
+				// Gender-based Friday filtering
+				if now.Weekday() == time.Friday {
+					if student.JK == "L" && template.JenisSholat.NamaJenis == "Dzuhur" {
+						continue
+					}
+					if student.JK == "P" && template.JenisSholat.NamaJenis == "Jumat" {
+						continue
+					}
+				} else {
+					if template.JenisSholat.NamaJenis == "Jumat" {
+						continue
+					}
+				}
+
+				// Get kelas info
+				kelas := ""
+				jurusan := ""
+				if student.KelasRef != nil {
+					kelas = strconv.Itoa(student.KelasRef.Tingkatan) + student.KelasRef.Part
+					jurusan = student.KelasRef.Jurusan
+				}
+
+				notifications = append(notifications, NotificationItem{
+					NIS:         student.NIS,
+					NamaSiswa:   student.NamaSiswa,
+					Kelas:       kelas,
+					Jurusan:     jurusan,
+					JenisSholat: template.JenisSholat.NamaJenis,
+					IDTemplate:  template.IDTemplate,
+				})
+			}
+		}
 					}
 					// Gender-based Friday filtering
 					if now.Weekday() == time.Friday {

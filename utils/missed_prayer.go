@@ -47,86 +47,84 @@ func RecordMissedPrayers(db *gorm.DB, logger *zap.SugaredLogger) error {
 		}
 		isFriday := t.Weekday() == time.Friday
 
-		// Find all prayer sessions for this day
-		var prayers []models.JadwalSholat
-		query := db.Where("hari = ?", dayName)
-
-		// If it's today, only look at prayers that have finished
-		if dateStr == now.Format("2006-01-02") {
-			query = query.Where("waktu_selesai < ?", currentTime)
-		}
-
-		if err := query.Find(&prayers).Error; err != nil {
-			logger.Errorw("Failed to fetch prayers for missed recording", "day", dayName, "error", err.Error())
+		// Find all prayer templates for this day
+		var templates []models.JadwalSholatTemplate
+		if err := db.Preload("JenisSholat").Where("hari = ?", dayName).Find(&templates).Error; err != nil {
+			logger.Errorw("Failed to fetch prayer templates for missed recording", "day", dayName, "error", err.Error())
 			continue
 		}
 
-		if len(prayers) == 0 {
+		if len(templates) == 0 {
 			continue
 		}
 
-		// Get all students
+		// Get current active semester
+		var semester models.SemesterAkademik
+		if err := db.Where("tanggal_mulai <= ? AND tanggal_selesai >= ?", tanggal, tanggal).First(&semester).Error; err != nil {
+			logger.Warnw("No active semester found for date", "date", dateStr)
+			continue
+		}
+
+		// Get all students with kelas info
 		var students []models.Siswa
-		if err := db.Find(&students).Error; err != nil {
+		if err := db.Preload("KelasRef").Where("deleted_at IS NULL").Find(&students).Error; err != nil {
 			logger.Errorw("Failed to fetch students", "error", err.Error())
 			return err
 		}
 
-		// Collect prayer IDs for this day
-		prayerIDs := make([]int, len(prayers))
-		for i, p := range prayers {
-			prayerIDs[i] = p.IDJadwal
+		// Collect template IDs for this day
+		templateIDs := make([]int, len(templates))
+		for i, tmpl := range templates {
+			templateIDs[i] = tmpl.IDTemplate
 		}
 
-		// Get all existing attendances for these prayers on this date
+		// Get all existing attendances for these templates on this date
 		var existingAttendances []models.Absensi
-		if err := db.Where("tanggal = ? AND id_jadwal IN (?)",
-			tanggal, prayerIDs).
+		if err := db.Where("tanggal = ? AND id_template IN (?)",
+			tanggal, templateIDs).
 			Find(&existingAttendances).Error; err != nil {
 			logger.Errorw("Failed to fetch existing attendances", "date", dateStr, "error", err.Error())
 			continue
 		}
 
-		// Map of existing records: NIS-JadwalID
+		// Map of existing records: SISWA-TEMPLATE
 		existingMap := make(map[string]bool)
 		for _, att := range existingAttendances {
-			key := fmt.Sprintf("%s-%d", att.NIS, att.IDJadwal)
+			key := fmt.Sprintf("%d-%d", att.IDSiswa, att.IDTemplate)
 			existingMap[key] = true
 		}
 
 		var missingRecords []models.Absensi
-		for _, prayer := range prayers {
+		for _, tmpl := range templates {
 			for _, student := range students {
 				// Gender-based filtering on Fridays
 				if isFriday {
-					if student.JK == "L" && prayer.JenisSholat == "Dzuhur" {
+					if student.JK == "L" && tmpl.JenisSholat.NamaJenis == "Dzuhur" {
 						continue
 					}
-					if student.JK == "P" && prayer.JenisSholat == "Jumat" {
+					if student.JK == "P" && tmpl.JenisSholat.NamaJenis == "Jumat" {
 						continue
 					}
 				} else {
-					if prayer.JenisSholat == "Jumat" {
+					if tmpl.JenisSholat.NamaJenis == "Jumat" {
 						continue
 					}
 				}
 
-				// Jurusan filtering (if defined for the prayer)
-				if prayer.Jurusan != "" && prayer.Jurusan != "Semua Jurusan" {
-					if student.Jurusan != prayer.Jurusan {
-						continue
-					}
+				// For Dhuha, check if student needs giliran (but we'll handle in attendance creation)
+				if tmpl.JenisSholat.ButuhGiliran && tmpl.JenisSholat.NamaJenis == "Dhuha" {
+					// Skip auto-marking Dhuha if no giliran specified - should be marked manually
+					continue
 				}
 
-				key := fmt.Sprintf("%s-%d", student.NIS, prayer.IDJadwal)
+				key := fmt.Sprintf("%d-%d", student.IDSiswa, tmpl.IDTemplate)
 				if !existingMap[key] {
 					absensi := models.Absensi{
-						IDSiswa:   student.IDSiswa,
-						NIS:       student.NIS,
-						IDJadwal:  prayer.IDJadwal,
-						Tanggal:   tanggal,
-						Status:    "alpha",
-						Deskripsi: fmt.Sprintf("Absensi otomatis (%s) - tidak hadir", prayer.JenisSholat),
+						IDSiswa:    student.IDSiswa,
+						IDSemester: semester.IDSemester,
+						IDTemplate: tmpl.IDTemplate,
+						Tanggal:    tanggal,
+						Status:     "alpha",
 					}
 					missingRecords = append(missingRecords, absensi)
 				}
@@ -141,7 +139,7 @@ func RecordMissedPrayers(db *gorm.DB, logger *zap.SugaredLogger) error {
 				logger.Infow("Bulk recorded missed prayers",
 					"count", len(missingRecords),
 					"date", dateStr,
-					"prayers_processed", len(prayers),
+					"templates_processed", len(templates),
 				)
 			}
 		}
