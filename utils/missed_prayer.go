@@ -31,7 +31,6 @@ func StartMissedPrayerRecorder(db *gorm.DB, logger *zap.SugaredLogger, interval 
 // Gender-aware: On Fridays, males are assigned to Jumat and females to Dzuhur
 func RecordMissedPrayers(db *gorm.DB, logger *zap.SugaredLogger) error {
 	now := GetJakartaTime()
-	currentTime := now.Format("15:04:05")
 
 	// We check for prayers that ended TODAY or YESTERDAY to be safe against midnight transitions
 	// or server downtime at the end of a day.

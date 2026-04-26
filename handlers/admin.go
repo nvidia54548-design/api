@@ -46,6 +46,21 @@ type StaffAccountDTO struct {
 	NIP       string `json:"nip,omitempty"`
 }
 
+func nipPtr(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func nipValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func AdminListUsersStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var rows []StaffAccountDTO
@@ -115,7 +130,7 @@ func AdminCreateUserStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFun
 			c.JSON(http.StatusConflict, gin.H{"message": "Username/email sudah digunakan"})
 			return
 		}
-		staff := models.Staff{IDAccount: account.ID, Nama: strings.TrimSpace(input.Name), NIP: strings.TrimSpace(input.NIP), TipeStaff: input.Role}
+		staff := models.Staff{IDAccount: account.ID, Nama: strings.TrimSpace(input.Name), NIP: nipPtr(input.NIP), TipeStaff: input.Role}
 		if staff.Nama == "" {
 			staff.Nama = account.Email
 		}
@@ -134,7 +149,7 @@ func AdminCreateUserStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFun
 			Username:  account.Email,
 			Role:      account.Role,
 			Name:      staff.Nama,
-			NIP:       staff.NIP,
+			NIP:       nipValue(staff.NIP),
 		}})
 	}
 }
@@ -193,7 +208,7 @@ func AdminUpdateUserStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFun
 			staff.Nama = strings.TrimSpace(*input.Name)
 		}
 		if input.NIP != nil {
-			staff.NIP = strings.TrimSpace(*input.NIP)
+			staff.NIP = nipPtr(*input.NIP)
 		}
 
 		tx := db.Begin()
@@ -217,7 +232,7 @@ func AdminUpdateUserStaff(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFun
 			Username:  account.Email,
 			Role:      account.Role,
 			Name:      staff.Nama,
-			NIP:       staff.NIP,
+			NIP:       nipValue(staff.NIP),
 		}})
 	}
 }

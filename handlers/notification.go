@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -46,7 +47,6 @@ func GetPendingNotifications(db *gorm.DB, logger *zap.SugaredLogger) gin.Handler
 		}
 		now := time.Now().In(loc)
 		currentDay := getDayName(now.Weekday())
-		currentTime := now.Format("15:04:05")
 		today := now.Format("2006-01-02")
 
 		// Find prayer templates for current day
@@ -71,10 +71,8 @@ func GetPendingNotifications(db *gorm.DB, logger *zap.SugaredLogger) gin.Handler
 
 		// Get template IDs
 		templateIDs := make([]int, len(templates))
-		templateMap := make(map[int]models.JadwalSholatTemplate)
 		for i, t := range templates {
 			templateIDs[i] = t.IDTemplate
-			templateMap[t.IDTemplate] = t
 		}
 
 		// Get all students with kelas info
@@ -102,14 +100,14 @@ func GetPendingNotifications(db *gorm.DB, logger *zap.SugaredLogger) gin.Handler
 		// Map of attended: NIS-TemplateID
 		attended := make(map[string]bool)
 		for _, r := range existingRecords {
-			attended[r.NIS+"-"+strconv.Itoa(r.IDTemplate)] = true
+			attended[strconv.Itoa(r.IDSiswa)+"-"+strconv.Itoa(r.IDTemplate)] = true
 		}
 
 		var notifications []NotificationItem
 		for _, template := range templates {
 			for _, student := range students {
 				// Skip if already attended
-				if attended[student.NIS+"-"+strconv.Itoa(template.IDTemplate)] {
+				if attended[strconv.Itoa(student.IDSiswa)+"-"+strconv.Itoa(template.IDTemplate)] {
 					continue
 				}
 
@@ -143,29 +141,6 @@ func GetPendingNotifications(db *gorm.DB, logger *zap.SugaredLogger) gin.Handler
 					JenisSholat: template.JenisSholat.NamaJenis,
 					IDTemplate:  template.IDTemplate,
 				})
-			}
-		}
-					}
-					// Gender-based Friday filtering
-					if now.Weekday() == time.Friday {
-						if student.JK == "L" && prayer.JenisSholat == "Dzuhur" {
-							continue
-						}
-						if student.JK == "P" && prayer.JenisSholat == "Jumat" {
-							continue
-						}
-					}
-
-					notifications = append(notifications, NotificationItem{
-						NIS:         student.NIS,
-						NamaSiswa:   student.NamaSiswa,
-						Kelas:       student.Kelas,
-						Jurusan:     student.Jurusan,
-						JenisSholat: prayer.JenisSholat,
-						WaktuMulai:  prayer.WaktuMulai,
-						IDJadwal:    prayer.IDJadwal,
-					})
-				}
 			}
 		}
 

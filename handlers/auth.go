@@ -214,7 +214,11 @@ func Login(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			return
 		}
 
-		accessToken, tokenErr := utils.GenerateTokenWithNIP(staff.Account.Email, staff.Account.Email, staff.Account.Role, staff.Nama, staff.NIP)
+		nip := ""
+		if staff.NIP != nil {
+			nip = *staff.NIP
+		}
+		accessToken, tokenErr := utils.GenerateTokenWithNIP(staff.Account.Email, staff.Account.Email, staff.Account.Role, staff.Nama, nip)
 		if tokenErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat token akses staff"})
 			return
@@ -227,7 +231,7 @@ func Login(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			"username": staff.Account.Email,
 			"nama":     staff.Nama,
 			"name":     staff.Nama,
-			"nip":      staff.NIP,
+			"nip":      nip,
 		}})
 	}
 }
@@ -285,13 +289,17 @@ func Me(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "Akun tidak ditemukan"})
 			return
 		}
+		nip := ""
+		if staff.NIP != nil {
+			nip = *staff.NIP
+		}
 		c.JSON(http.StatusOK, gin.H{"data": LoginResponse{
 			Username: staff.Account.Email,
 			Role:     staff.Account.Role,
 			IDStaff:  staff.IDStaff,
 			Name:     staff.Nama,
 			Nama:     staff.Nama,
-			NIP:      staff.NIP,
+			NIP:      nip,
 		}})
 	}
 }

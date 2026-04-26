@@ -167,8 +167,11 @@ func applyStudentTransition(tx *gorm.DB, student models.Siswa, input studentTran
 		updateData["current_semester"] = *input.TargetSemester
 	}
 
-	var fromClassValue interface{} = student.IDKelas
-	if student.IDKelas == 0 && strings.TrimSpace(student.Kelas) != "" {
+	var fromClassValue interface{}
+	if student.IDKelas != nil {
+		fromClassValue = *student.IDKelas
+	}
+	if student.IDKelas == nil && strings.TrimSpace(student.Kelas) != "" {
 		fromClassValue = strings.TrimSpace(student.Kelas)
 	}
 	var toClassValue interface{}

@@ -251,9 +251,10 @@ func GetSiswa(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"data": siswaList,
 			"meta": gin.H{
-				"total": totalItems,
-				"page":  filter.Page,
-				"limit": filter.PageSize,
+				"total":       totalItems,
+				"total_pages": totalPages,
+				"page":        filter.Page,
+				"limit":       filter.PageSize,
 			},
 		})
 	}

@@ -399,14 +399,6 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			Tanggal:    tanggal,
 			Status:     "hadir",
 		}
-			return
-		}
-		absensi := models.Absensi{
-			IDSiswa:  siswa.IDSiswa,
-			IDJadwal: idJadwal,
-			Tanggal:  tanggal,
-			Status:   "hadir",
-		}
 
 		if err := db.Create(&absensi).Error; err != nil {
 			logger.Errorw("Failed to create absensi",
@@ -429,9 +421,18 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		logger.Infow("Absensi recorded via QR code",
 			"nis", nisStr,
 			"nama_siswa", siswa.NamaSiswa,
-			"jadwal_id", idJadwal,
-			"jenis_sholat", jadwal.JenisSholat,
+			"template_id", idTemplate,
+			"jenis_sholat", jenisSholatName,
 		)
+
+		kelasStr := ""
+		if siswa.KelasRef != nil {
+			kelasStr = strconv.Itoa(siswa.KelasRef.Tingkatan) + siswa.KelasRef.Part
+		}
+		jurusanStr := ""
+		if siswa.KelasRef != nil {
+			jurusanStr = siswa.KelasRef.Jurusan
+		}
 
 		c.JSON(http.StatusOK, VerifyQRResponse{
 			Message: "Absensi berhasil dicatat",
@@ -439,9 +440,9 @@ func VerifyQRCode(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 				Valid:       true,
 				NIS:         siswa.NIS,
 				NamaSiswa:   siswa.NamaSiswa,
-				Kelas:       siswa.Kelas,
-				Jurusan:     siswa.Jurusan,
-				JenisSholat: jadwal.JenisSholat,
+				Kelas:       kelasStr,
+				Jurusan:     jurusanStr,
+				JenisSholat: jenisSholatName,
 				Tanggal:     today,
 				Status:      "hadir",
 			},
@@ -510,7 +511,6 @@ func GenerateQRCodeImage(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc
 		// Get current day and time in WIB (UTC+7)
 		now := utils.GetJakartaTime()
 		currentDay := getDayName(now.Weekday())
-		currentTime := now.Format("15:04:05")
 
 		// Find active prayer template for current day
 		var template models.JadwalSholatTemplate
@@ -596,16 +596,21 @@ func GenerateQRCodeImage(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc
 			return
 		}
 
+		jenisSholatName := ""
+		if template.JenisSholat != nil {
+			jenisSholatName = template.JenisSholat.NamaJenis
+		}
+
 		logger.Infow("QR code image generated successfully",
-			"jadwal_id", jadwal.IDJadwal,
-			"jenis_sholat", jadwal.JenisSholat,
+			"template_id", template.IDTemplate,
+			"jenis_sholat", jenisSholatName,
 			"expires_at", expiresAt,
 		)
 
 		// Set response headers for PNG image
 		c.Header("Content-Type", "image/png")
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"qrcode_%s_%d.png\"",
-			jadwal.JenisSholat, jadwal.IDJadwal))
+			jenisSholatName, template.IDTemplate))
 		c.Data(http.StatusOK, "image/png", qrPNG)
 	}
 }

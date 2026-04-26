@@ -3,17 +3,18 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"absensholat-api/models"
 	"absensholat-api/utils"
 )
 
 type StatisticsResponse struct {
+	Message string         `json:"message,omitempty"`
 	Data StatisticsData `json:"data"`
 }
 

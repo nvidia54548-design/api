@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -39,6 +40,20 @@ type JadwalSholatTemplateCreateRequest struct {
 type JadwalSholatTemplateUpdateRequest struct {
 	Hari    string `json:"hari"`
 	IDJenis int    `json:"id_jenis"`
+}
+
+type JadwalSholatUpdateRequest struct {
+	Hari         string `json:"hari"`
+	JenisSholat  string `json:"jenis_sholat"`
+	WaktuMulai   string `json:"waktu_mulai"`
+	WaktuSelesai string `json:"waktu_selesai"`
+	Jurusan      string `json:"jurusan"`
+	Kelas        string `json:"kelas"`
+}
+
+type JadwalSholatResponse struct {
+	Message string             `json:"message,omitempty"`
+	Data    models.JadwalSholat `json:"data"`
 }
 
 type JadwalSholatErrorResponse struct {
@@ -197,8 +212,6 @@ func GetJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		}
 		if req.IDJenis > 0 {
 			query = query.Where("id_jenis = ?", req.IDJenis)
-		}
-			query = query.Where("jurusan = ?", req.Jurusan)
 		}
 
 		// Get total count
