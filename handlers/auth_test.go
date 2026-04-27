@@ -34,7 +34,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	}
 
 	// Auto-migrate models
-	err = db.AutoMigrate(&models.Siswa{}, &models.AkunLoginSiswa{}, &models.UserStaff{}, &models.Admin{}, &models.Guru{}, &models.RefreshToken{})
+	err = db.AutoMigrate(&models.Siswa{}, &models.AkunLoginSiswa{}, &models.UserStaff{}, &models.Admin{}, &models.Guru{})
 	if err != nil {
 		t.Fatalf("Failed to migrate test database: %v", err)
 	}
@@ -214,20 +214,23 @@ func TestRegister_DuplicateAccount(t *testing.T) {
 	db := setupTestDB(t)
 	logger := setupTestLogger()
 
-	// Create student
-	db.Create(&models.Siswa{
-		NIS:       "12345",
-		NamaSiswa: "Test Student",
-		JK:        "L",
-	})
-
 	// Create existing account
 	hashedPwd, err := utils.HashPassword("existingPass123!")
 	require.NoError(t, err)
-	db.Create(&models.AkunLoginSiswa{
-		NIS:      "12345",
-		Password: hashedPwd,
+	account := models.Account{
 		Email:    "existing@gmail.com",
+		Password: hashedPwd,
+		Role:     "siswa",
+	}
+	db.Create(&account)
+
+	// Create student (already registered)
+	db.Create(&models.Siswa{
+		NIS:          "12345",
+		NamaSiswa:    "Test Student",
+		JK:           "L",
+		IDAccount:    account.ID,
+		IsRegistered: true,
 	})
 
 	router := gin.New()

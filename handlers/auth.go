@@ -89,20 +89,24 @@ func Register(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 			}
 		}
 
+		// Langkah 1: Cek apakah NIS valid dan belum punya akun
 		var siswa models.Siswa
-		if err := db.First(&siswa, "nis = ?", input.NIS).Error; err != nil {
+		if err := db.Where("nis = ? AND is_registered = ?", input.NIS, false).First(&siswa).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
+				// Cek apakah NIS ada tapi sudah terdaftar
+				var checkSiswa models.Siswa
+				if db.First(&checkSiswa, "nis = ?", input.NIS).Error == nil {
+					c.JSON(http.StatusConflict, gin.H{"message": "Akun untuk NIS ini sudah terdaftar"})
+					return
+				}
 				c.JSON(http.StatusUnauthorized, gin.H{"message": "NIS tidak terdaftar sebagai siswa"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal memverifikasi NIS"})
 			return
 		}
-		if siswa.IDAccount != 0 {
-			c.JSON(http.StatusConflict, gin.H{"message": "Akun untuk NIS ini sudah terdaftar"})
-			return
-		}
 
+		// Check if email already used
 		var existing models.Account
 		if err := db.First(&existing, "email = ?", input.Email).Error; err == nil {
 			c.JSON(http.StatusConflict, gin.H{"message": "Email sudah digunakan"})
@@ -119,17 +123,24 @@ func Register(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 		}
 
 		tx := db.Begin()
+		// Langkah 2: Buat akun baru
 		account := models.Account{Email: input.Email, Password: hashed, Role: "siswa"}
 		if err := tx.Create(&account).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat akun"})
 			return
 		}
-		if err := tx.Model(&models.Siswa{}).Where("id_siswa = ?", siswa.IDSiswa).Update("id_account", account.ID).Error; err != nil {
+
+		// Langkah 3: Hubungkan siswa ke akun + tandai registered
+		if err := tx.Model(&models.Siswa{}).Where("id_siswa = ?", siswa.IDSiswa).Updates(map[string]interface{}{
+			"id_account":    account.ID,
+			"is_registered": true,
+		}).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menautkan akun siswa"})
 			return
 		}
+
 		if err := tx.Commit().Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal menyimpan akun"})
 			return

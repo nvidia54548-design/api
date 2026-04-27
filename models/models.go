@@ -47,6 +47,8 @@ type Siswa struct {
 	IDTahunMasuk    *int       `gorm:"column:id_tahun_masuk" json:"id_tahun_masuk,omitempty"`
 	ClassStatus     string     `gorm:"column:class_status;default:'active'" json:"class_status"`
 	LastPromotionAt *time.Time `gorm:"column:last_promotion_at" json:"last_promotion_at,omitempty"`
+	IsRegistered    bool       `gorm:"column:is_registered;default:false" json:"is_registered"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 	DeletedAt       *time.Time `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
 	Account         *Account   `gorm:"foreignKey:IDAccount;references:ID" json:"-"`
 	KelasRef        *Kelas     `gorm:"foreignKey:IDKelas;references:IDKelas" json:"-"`

@@ -18,6 +18,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type JadwalSholatCreateRequest struct {
+	Hari         string `json:"hari"`
+	JenisSholat  string `json:"jenis_sholat"`
+	WaktuMulai   string `json:"waktu_mulai"`
+	WaktuSelesai string `json:"waktu_selesai"`
+	Jurusan      string `json:"jurusan"`
+	Kelas        string `json:"kelas"`
+}
+
 // setupTestDBJadwal creates an in-memory SQLite database for testing jadwal handlers
 func setupTestDBJadwal(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
