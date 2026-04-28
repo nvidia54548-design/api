@@ -25,10 +25,17 @@ const scalarTemplate = `<!doctype html>
 `
 
 // ScalarDocsHandler serves the Scalar API reference page.
-func ScalarDocsHandler(title, specURL string) gin.HandlerFunc {
+func ScalarDocsHandler(title, specPath string) gin.HandlerFunc {
 	tmpl := template.Must(template.New("scalar").Parse(scalarTemplate))
 
 	return func(c *gin.Context) {
+		scheme := "http"
+		if c.Request.TLS != nil {
+			scheme = "https"
+		}
+		host := c.Request.Host
+		specURL := scheme + "://" + host + specPath
+
 		var buf bytes.Buffer
 		_ = tmpl.Execute(&buf, map[string]string{
 			"Title":   title,
