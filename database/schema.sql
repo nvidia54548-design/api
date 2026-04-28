@@ -319,6 +319,33 @@ CREATE INDEX "idx_rekap_semester_jenis"
 
 
 -- ============================================================
+-- 14. otp_codes
+-- Storage for OTP codes used in password reset and email change flows.
+-- OTP codes expire after 10 minutes and are automatically cleaned up.
+-- ============================================================
+CREATE TABLE "otp_codes" (
+    "id"         serial      PRIMARY KEY,
+    "nis"        varchar(20) NOT NULL,
+    "email"      varchar(255) NOT NULL,
+    "code"       varchar(6)  NOT NULL,
+    "expires_at" timestamp   NOT NULL,
+    "verified"   boolean     NOT NULL DEFAULT false,
+    "created_at" timestamp   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" timestamp   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "otp_codes_code_check"
+        CHECK (length(code) = 6 AND code ~ '^[0-9]{6}$')
+);
+
+-- Index for fast lookup by NIS
+CREATE INDEX "idx_otp_codes_nis"
+    ON "otp_codes" ("nis");
+
+-- Index for cleanup of expired codes
+CREATE INDEX "idx_otp_codes_expires_at"
+    ON "otp_codes" ("expires_at");
+
+
+-- ============================================================
 -- SEED DATA AWAL — jenis_sholat (wajib diisi sebelum pakai)
 -- ============================================================
 INSERT INTO "jenis_sholat" ("nama_jenis", "butuh_giliran") VALUES

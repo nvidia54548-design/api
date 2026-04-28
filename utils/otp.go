@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"absensholat-api/models"
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	"github.com/mailersend/mailersend-go"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 )
 
 // OTPEntry stores OTP data with expiration
@@ -33,6 +35,20 @@ type OTPEntry struct {
 	CreatedAt time.Time `firestore:"created_at"`
 }
 
+// OTPStore interface for OTP operations
+type OTPStore interface {
+	SaveOTP(nis, email, code string, expiration time.Duration) error
+	VerifyOTP(nis, code string) (bool, error)
+	IsVerified(nis string) bool
+	ClearOTP(nis string) error
+	CleanupExpired() error
+}
+
+// DatabaseOTPStore manages OTPs using database
+type DatabaseOTPStore struct {
+	db *gorm.DB
+}
+
 // FirebaseOTPStore manages OTPs using Firebase Firestore
 type FirebaseOTPStore struct {
 	client     *firestore.Client
@@ -41,11 +57,14 @@ type FirebaseOTPStore struct {
 
 var (
 	firestoreClient  *firestore.Client
-	otpStore         *FirebaseOTPStore
+	otpStore         OTPStore
 	firebaseInitOnce sync.Once
 	firebaseInitErr  error
 	otpCleanupOnce   sync.Once
 	// firebaseApp      *firebase.App // REMOVED: Variable not used anywhere
+
+	// Database OTP store
+	dbOTPStore       *DatabaseOTPStore
 )
 
 func envBool(key string, defaultValue bool) bool {
@@ -224,8 +243,17 @@ func IsFirebaseInitialized() bool {
 	return firestoreClient != nil && firebaseInitErr == nil
 }
 
-// GetOTPStore returns the global Firebase OTP store
-func GetOTPStore() *FirebaseOTPStore {
+// InitDatabaseOTPStore initializes the database OTP store
+func InitDatabaseOTPStore(db *gorm.DB) {
+	dbOTPStore = &DatabaseOTPStore{db: db}
+}
+
+// GetOTPStore returns the database OTP store (preferred over Firebase)
+func GetOTPStore() OTPStore {
+	if dbOTPStore != nil {
+		return dbOTPStore
+	}
+	// Fallback to Firebase if database store not initialized
 	lazyInitFirebaseIfNeeded()
 	return otpStore
 }
@@ -462,6 +490,74 @@ func (s *FirebaseOTPStore) CleanupExpired() error {
 	return nil
 }
 
+// DatabaseOTPStore methods
+
+// SaveOTP stores an OTP entry in database
+func (s *DatabaseOTPStore) SaveOTP(nis, email, code string, expiration time.Duration) error {
+	entry := models.OTPCode{
+		NIS:       nis,
+		Email:     email,
+		Code:      code,
+		ExpiresAt: time.Now().Add(expiration),
+		Verified:  false,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	result := s.db.Create(&entry)
+	return result.Error
+}
+
+// VerifyOTP checks if the OTP is valid for the given NIS
+func (s *DatabaseOTPStore) VerifyOTP(nis, code string) (bool, error) {
+	var entry models.OTPCode
+	result := s.db.Where("nis = ? AND code = ? AND expires_at > ?", nis, code, time.Now()).First(&entry)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return false, fmt.Errorf("tidak ada permintaan reset password untuk NIS ini")
+		}
+		return false, fmt.Errorf("failed to verify OTP: %w", result.Error)
+	}
+
+	if time.Now().After(entry.ExpiresAt) {
+		// Delete expired OTP
+		s.db.Delete(&entry)
+		return false, fmt.Errorf("kode OTP sudah kadaluarsa")
+	}
+
+	if entry.Code != code {
+		return false, fmt.Errorf("kode OTP tidak valid")
+	}
+
+	// Mark as verified
+	entry.Verified = true
+	entry.UpdatedAt = time.Now()
+	s.db.Save(&entry)
+
+	return true, nil
+}
+
+// IsVerified checks if the OTP has been verified for password reset
+func (s *DatabaseOTPStore) IsVerified(nis string) bool {
+	var entry models.OTPCode
+	result := s.db.Where("nis = ? AND expires_at > ? AND verified = ?", nis, time.Now(), true).First(&entry)
+
+	return result.Error == nil
+}
+
+// ClearOTP removes the OTP entry for a given NIS from database
+func (s *DatabaseOTPStore) ClearOTP(nis string) error {
+	result := s.db.Where("nis = ?", nis).Delete(&models.OTPCode{})
+	return result.Error
+}
+
+// CleanupExpired removes all expired OTP entries from database
+func (s *DatabaseOTPStore) CleanupExpired() error {
+	result := s.db.Where("expires_at < ?", time.Now()).Delete(&models.OTPCode{})
+	return result.Error
+}
+
 // StartOTPCleanup starts a background goroutine to clean up expired OTPs
 func StartOTPCleanup(interval time.Duration) {
 	go func() {
@@ -473,6 +569,12 @@ func StartOTPCleanup(interval time.Duration) {
 				// FIXED: Handle error from CleanupExpired
 				if cleanupErr := otpStore.CleanupExpired(); cleanupErr != nil {
 					log.Printf("Failed to cleanup expired OTPs: %v", cleanupErr)
+				}
+			}
+			if dbOTPStore != nil {
+				// Cleanup database OTPs too
+				if cleanupErr := dbOTPStore.CleanupExpired(); cleanupErr != nil {
+					log.Printf("Failed to cleanup expired database OTPs: %v", cleanupErr)
 				}
 			}
 		}

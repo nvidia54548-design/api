@@ -218,6 +218,21 @@ func (RekapAbsensi) TableName() string {
 	return "rekap_absensi"
 }
 
+type OTPCode struct {
+	ID        int       `gorm:"primaryKey;column:id" json:"id"`
+	NIS       string    `gorm:"column:nis;not null" json:"nis"`
+	Email     string    `gorm:"column:email;not null" json:"email"`
+	Code      string    `gorm:"column:code;not null" json:"code"`
+	ExpiresAt time.Time `gorm:"column:expires_at;not null" json:"expires_at"`
+	Verified  bool      `gorm:"column:verified;not null;default:false" json:"verified"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OTPCode) TableName() string {
+	return "otp_codes"
+}
+
 
 // Legacy transition models retained to keep old call sites compiling.
 type UserStaff struct {

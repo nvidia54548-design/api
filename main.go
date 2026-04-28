@@ -166,6 +166,15 @@ func main() {
 	}
 	startupTimer.Mark("schema_ready")
 
+	// Initialize database OTP store
+	utils.InitDatabaseOTPStore(db)
+	sugar.Info("Database OTP store initialized")
+
+	// Start OTP cleanup scheduler (5 minutes interval)
+	utils.StartOTPCleanup(5 * time.Minute)
+	sugar.Info("OTP cleanup scheduler started - will clean expired OTPs every 5 minutes")
+	startupTimer.Mark("otp_store_initialized")
+
 	// Start background task to record missed prayers (check every 5 minutes)
 	utils.StartMissedPrayerRecorder(db, sugar, 5*time.Minute)
 	sugar.Info("Missed prayer recorder started - will check for ended prayers every 5 minutes")
