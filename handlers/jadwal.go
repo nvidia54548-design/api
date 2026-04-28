@@ -109,19 +109,42 @@ func GetJadwalDhuhaToday(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc
 	return func(c *gin.Context) {
 		hari := utils.GetIndonesianDayName(utils.GetJakartaTime())
 
-		var jadwals []models.JadwalSholat
-		if err := db.Where("jenis_sholat = ? AND (hari = ? OR hari = 'Senin-Minggu' OR hari = 'Semua Hari' OR (hari = 'Senin-Jumat' AND ? NOT IN ('Sabtu', 'Minggu')) OR (hari = 'Senin-Kamis' AND ? NOT IN ('Jumat', 'Sabtu', 'Minggu')))", "Dhuha", hari, hari, hari).Find(&jadwals).Error; err != nil {
-			logger.Error("Failed to get jadwal dhuha", "error", err)
+		// Get dhuha rotation
+		var gilirans []models.GiliranDhuha
+		if err := db.Where("hari = ?", hari).Find(&gilirans).Error; err != nil {
+			logger.Error("Failed to get giliran dhuha", "error", err)
 			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
 				Error:   "DATABASE_ERROR",
-				Message: "Failed to retrieve jadwal dhuha",
+				Message: "Failed to retrieve dhuha rotation",
 			})
 			return
 		}
 
-		// Collect unique jurusan — return ALL scheduled jurusan (no limit)
+		// Get dhuha time
+		var waktu models.WaktuSholat
+		if err := db.Joins("JOIN jenis_sholat ON jenis_sholat.id_jenis = waktu_sholat.id_jenis").
+			Where("jenis_sholat.nama_jenis = ? AND (berlaku_sampai IS NULL OR berlaku_sampai >= CURRENT_DATE)", "Dhuha").
+			Order("berlaku_mulai DESC").
+			First(&waktu).Error; err != nil {
+			logger.Warn("Dhuha time not configured", "error", err)
+			// Continue with empty times if not found
+		}
+
+		// Synthesize JadwalSholat objects for backward compatibility
+		var jadwals []models.JadwalSholat
+		for _, g := range gilirans {
+			jadwals = append(jadwals, models.JadwalSholat{
+				Hari:         g.Hari,
+				JenisSholat:  "Dhuha",
+				WaktuMulai:   waktu.WaktuMulai,
+				WaktuSelesai: waktu.WaktuSelesai,
+				Jurusan:      g.Jurusan,
+			})
+		}
+
+		// Collect unique jurusan
 		jurusanMap := make(map[string][]models.JadwalSholat)
-		jurusanOrder := []string{} // preserve insertion order
+		jurusanOrder := []string{}
 		for _, jadwal := range jadwals {
 			if _, exists := jurusanMap[jadwal.Jurusan]; !exists {
 				jurusanOrder = append(jurusanOrder, jadwal.Jurusan)
@@ -430,7 +453,7 @@ func UpdateJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 			return
 		}
 
-		var req JadwalSholatUpdateRequest
+		var req JadwalSholatTemplateUpdateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			logger.Error("Invalid request body", "error", err)
 			c.JSON(http.StatusBadRequest, JadwalSholatErrorResponse{
@@ -440,21 +463,21 @@ func UpdateJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 			return
 		}
 
-		// Check if jadwal exists
-		var jadwal models.JadwalSholat
-		if err := db.First(&jadwal, "id_jadwal = ?", id).Error; err != nil {
+		// Check if template exists
+		var template models.JadwalSholatTemplate
+		if err := db.First(&template, "id_template = ?", id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				logger.Warn("Jadwal sholat not found", "id", id)
+				logger.Warn("Jadwal sholat template not found", "id", id)
 				c.JSON(http.StatusNotFound, JadwalSholatErrorResponse{
 					Error:   "NOT_FOUND",
-					Message: "Jadwal sholat not found",
+					Message: "Jadwal sholat template not found",
 				})
 				return
 			}
-			logger.Error("Failed to find jadwal sholat", "id", id, "error", err)
+			logger.Error("Failed to find jadwal sholat template", "id", id, "error", err)
 			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
 				Error:   "DATABASE_ERROR",
-				Message: "Failed to find jadwal sholat",
+				Message: "Failed to find jadwal sholat template",
 			})
 			return
 		}
@@ -464,62 +487,38 @@ func UpdateJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 		if req.Hari != "" {
 			updates["hari"] = req.Hari
 		}
-		if req.JenisSholat != "" {
-			updates["jenis_sholat"] = req.JenisSholat
-		}
-		if req.WaktuMulai != "" {
-			updates["waktu_mulai"] = req.WaktuMulai
-		}
-		if req.WaktuSelesai != "" {
-			updates["waktu_selesai"] = req.WaktuSelesai
-		}
-		if req.Jurusan != "" {
-			updates["jurusan"] = req.Jurusan
-		}
-		if req.Kelas != "" {
-			updates["kelas"] = req.Kelas
+		if req.IDJenis != 0 {
+			updates["id_jenis"] = req.IDJenis
 		}
 
-		if err := db.Model(&jadwal).Updates(updates).Error; err != nil {
-			logger.Error("Failed to update jadwal sholat", "id", id, "error", err)
+		if err := db.Model(&template).Updates(updates).Error; err != nil {
+			logger.Error("Failed to update jadwal sholat template", "id", id, "error", err)
 			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
 				Error:   "DATABASE_ERROR",
-				Message: "Failed to update jadwal sholat",
+				Message: "Failed to update jadwal sholat template",
 			})
 			return
 		}
 
-		// Retrieve updated jadwal
-		if err := db.First(&jadwal, "id_jadwal = ?", id).Error; err != nil {
-			logger.Error("Failed to retrieve updated jadwal sholat", "id", id, "error", err)
+		// Retrieve updated template
+		if err := db.Preload("JenisSholat").First(&template, "id_template = ?", id).Error; err != nil {
+			logger.Error("Failed to retrieve updated jadwal sholat template", "id", id, "error", err)
 			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
 				Error:   "DATABASE_ERROR",
-				Message: "Failed to retrieve updated jadwal sholat",
+				Message: "Failed to retrieve updated jadwal sholat template",
 			})
 			return
 		}
 
-		logger.Info("Jadwal sholat updated", "id", id)
-		c.JSON(http.StatusOK, JadwalSholatResponse{
-			Message: "Jadwal sholat updated successfully",
-			Data:    jadwal,
+		logger.Info("Jadwal sholat template updated", "id", id)
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Jadwal sholat template updated successfully",
+			"data":    template,
 		})
 	}
 }
 
-// DeleteJadwalSholat deletes a jadwal sholat by ID
-// @Summary Delete jadwal sholat
-// @Description Delete a jadwal sholat by its ID
-// @Tags jadwal-sholat
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Jadwal Sholat ID"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} JadwalSholatErrorResponse
-// @Failure 404 {object} JadwalSholatErrorResponse
-// @Failure 500 {object} JadwalSholatErrorResponse
-// @Router /jadwal-sholat/{id} [delete]
+// DeleteJadwalSholat deletes a jadwal sholat template by ID
 func DeleteJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -533,38 +532,38 @@ func DeleteJadwalSholat(db *gorm.DB, logger *zap.SugaredLogger) gin.HandlerFunc 
 			return
 		}
 
-		// Check if jadwal exists
-		var jadwal models.JadwalSholat
-		if err := db.First(&jadwal, "id_jadwal = ?", id).Error; err != nil {
+		// Check if template exists
+		var template models.JadwalSholatTemplate
+		if err := db.First(&template, "id_template = ?", id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				logger.Warn("Jadwal sholat not found", "id", id)
+				logger.Warn("Jadwal sholat template not found", "id", id)
 				c.JSON(http.StatusNotFound, JadwalSholatErrorResponse{
 					Error:   "NOT_FOUND",
-					Message: "Jadwal sholat not found",
+					Message: "Jadwal sholat template not found",
 				})
 				return
 			}
-			logger.Error("Failed to find jadwal sholat", "id", id, "error", err)
+			logger.Error("Failed to find jadwal sholat template", "id", id, "error", err)
 			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
 				Error:   "DATABASE_ERROR",
-				Message: "Failed to find jadwal sholat",
+				Message: "Failed to find jadwal sholat template",
 			})
 			return
 		}
 
-		// Delete the jadwal
-		if err := db.Delete(&jadwal).Error; err != nil {
-			logger.Error("Failed to delete jadwal sholat", "id", id, "error", err)
+		// Delete the template
+		if err := db.Delete(&template).Error; err != nil {
+			logger.Error("Failed to delete jadwal sholat template", "id", id, "error", err)
 			c.JSON(http.StatusInternalServerError, JadwalSholatErrorResponse{
 				Error:   "DATABASE_ERROR",
-				Message: "Failed to delete jadwal sholat",
+				Message: "Failed to delete jadwal sholat template",
 			})
 			return
 		}
 
-		logger.Info("Jadwal sholat deleted", "id", id)
+		logger.Info("Jadwal sholat template deleted", "id", id)
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Jadwal sholat deleted successfully",
+			"message": "Jadwal sholat template deleted successfully",
 		})
 	}
 }

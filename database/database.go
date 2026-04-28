@@ -93,17 +93,6 @@ func EnsureTablesCreated(db *gorm.DB, sugar *zap.SugaredLogger) error {
 
 func ensureStudentControlSchema(db *gorm.DB, sugar *zap.SugaredLogger) error {
 	statements := []string{
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS academic_year CHAR(9)`,
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS current_semester SMALLINT DEFAULT 1`,
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS class_status VARCHAR(20) DEFAULT 'active'`,
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS last_promotion_at TIMESTAMP NULL`,
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS id_account INTEGER`,
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS id_kelas INTEGER`,
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS jurusan VARCHAR(20)`,
-		`ALTER TABLE siswa ADD COLUMN IF NOT EXISTS kelas VARCHAR(50)`,
-		`ALTER TABLE jadwal_sholat ADD COLUMN IF NOT EXISTS jurusan VARCHAR(100)`,
-		`ALTER TABLE jadwal_sholat ADD COLUMN IF NOT EXISTS kelas VARCHAR(50)`,
-		`ALTER TABLE absensi ADD COLUMN IF NOT EXISTS nis VARCHAR(20)`,
 		`CREATE TABLE IF NOT EXISTS student_class_transitions (
 			id SERIAL PRIMARY KEY,
 			id_siswa INTEGER NOT NULL,
@@ -126,17 +115,6 @@ func ensureStudentControlSchema(db *gorm.DB, sugar *zap.SugaredLogger) error {
 		`CREATE INDEX IF NOT EXISTS idx_siswa_class_status ON siswa(class_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_student_class_transitions_id_siswa ON student_class_transitions(id_siswa)`,
 		`CREATE INDEX IF NOT EXISTS idx_student_class_transitions_created_at ON student_class_transitions(created_at)`,
-		`UPDATE siswa s
-		 SET jurusan = k.jurusan,
-		     kelas = CONCAT(k.tingkatan::text, k.part)
-		 FROM kelas k
-		 WHERE s.id_kelas = k.id_kelas
-		   AND (s.jurusan IS NULL OR s.kelas IS NULL)`,
-		`UPDATE absensi a
-		 SET nis = s.nis
-		 FROM siswa s
-		 WHERE a.id_siswa = s.id_siswa
-		   AND a.nis IS NULL`,
 	}
 
 	for _, stmt := range statements {

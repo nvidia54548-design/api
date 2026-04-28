@@ -1,0 +1,14 @@
+[Unit]
+Description=API Attendance SMKN 2 Singosari
+After=network.target
+
+[Service]
+Type=simple
+User=thinkpad
+WorkingDirectory=/home/thinkpad/Documents/malik/TA/server/api
+ExecStart=/home/thinkpad/Documents/malik/TA/server/api/attendance-app
+Restart=always
+EnvironmentFile=/home/thinkpad/Documents/malik/TA/server/api/.env
+
+[Install]
+WantedBy=multi-user.target
