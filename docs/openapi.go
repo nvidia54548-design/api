@@ -34,6 +34,13 @@ func OpenAPIJSONHandler(router *gin.Engine, isProduction bool) gin.HandlerFunc {
 			return
 		}
 
+		// Log successful generation for debugging
+		if logger := c.MustGet("logger"); logger != nil {
+			if sugar, ok := logger.(*zap.SugaredLogger); ok {
+				sugar.Infof("OpenAPI spec generated successfully, size: %d bytes", len(payload))
+			}
+		}
+
 		c.Data(200, "application/json; charset=utf-8", payload)
 	}
 }
@@ -102,10 +109,7 @@ func buildOpenAPISpec(router *gin.Engine, isProduction bool) map[string]any {
 		paths[normalizedPath].(map[string]any)[strings.ToLower(route.Method)] = operation
 	}
 
-	servers := []map[string]string{{"url": "http://localhost:8080"}}
-	if isProduction {
-		servers = []map[string]string{{"url": "/"}}
-	}
+	servers := []map[string]string{{"url": "/"}}
 
 	return map[string]any{
 		"openapi": openAPIVersion,
