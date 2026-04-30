@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log" // Added for logging
@@ -17,7 +19,6 @@ import (
 	"absensholat-api/models"
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
-	"github.com/mailersend/mailersend-go"
 	"google.golang.org/api/iterator" // <--- DITAMBAHKAN
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
@@ -608,22 +609,25 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// SendOTPEmail sends an OTP code to the specified email address using MailerSend API
+// SendOTPEmail sends an OTP code to the specified email address using Mailjet API v3.1
 func SendOTPEmail(toEmail, otpCode, namaSiswa string) error {
-	apiKey := os.Getenv("MAILERSEND_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("MAILERSEND_API_KEY not configured in environment variables")
+	mailjetAPIKey := os.Getenv("MAILJET_API_KEY")
+	mailjetAPISecret := os.Getenv("MAILJET_API_SECRET")
+	if mailjetAPIKey == "" || mailjetAPISecret == "" {
+		return fmt.Errorf("MAILJET_API_KEY and MAILJET_API_SECRET not configured in environment variables")
 	}
 
-	fromEmail := os.Getenv("MAILERSEND_FROM_EMAIL")
+	fromEmail := os.Getenv("MAILJET_FROM_EMAIL")
 	if fromEmail == "" {
-		return fmt.Errorf("MAILERSEND_FROM_EMAIL not configured in environment variables")
+		return fmt.Errorf("MAILJET_FROM_EMAIL not configured in environment variables")
 	}
 
-	ms := mailersend.NewMailersend(apiKey)
+	fromName := os.Getenv("MAILJET_FROM_NAME")
+	if fromName == "" {
+		fromName = "Sistem Absensi Sholat"
+	}
 
-	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	subject := "Kode OTP Reset Password - Sistem Absensi Sholat"
@@ -651,27 +655,48 @@ Jika Anda tidak meminta reset password, abaikan email ini.
 Salam,
 Tim Sistem Absensi Sholat`, namaSiswa, otpCode)
 
-	from := mailersend.From{
-		Name:  "Sistem Absensi Sholat",
-		Email: fromEmail,
-	}
-
-	recipients := []mailersend.Recipient{
-		{
-			Email: toEmail,
+	payload := map[string]interface{}{
+		"Messages": []map[string]interface{}{
+			{
+				"From": map[string]string{
+					"Email": fromEmail,
+					"Name":  fromName,
+				},
+				"To": []map[string]string{
+					{
+						"Email": toEmail,
+					},
+				},
+				"Subject":  subject,
+				"TextPart": textBody,
+				"HTMLPart": htmlBody,
+			},
 		},
 	}
 
-	message := ms.Email.NewMessage()
-	message.SetFrom(from)
-	message.SetRecipients(recipients)
-	message.SetSubject(subject)
-	message.SetHTML(htmlBody)
-	message.SetText(textBody)
-
-	_, err := ms.Email.Send(ctx, message)
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("gagal mengirim email: %w", err)
+		return fmt.Errorf("failed to marshal email payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.mailjet.com/v3.1/send", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth(mailjetAPIKey, mailjetAPISecret)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("mailjet API returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	return nil
