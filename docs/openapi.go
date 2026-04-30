@@ -2,6 +2,7 @@ package docs
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -27,25 +28,29 @@ type operationSpec struct {
 // OpenAPIJSONHandler serves a fully explicit OpenAPI document for development.
 func OpenAPIJSONHandler(router *gin.Engine, isProduction bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		spec := buildOpenAPISpec(router, isProduction)
-		payload, err := json.MarshalIndent(spec, "", "  ")
+		defer func() {
+			if r := recover(); r != nil {
+				c.JSON(500, gin.H{"error": "OpenAPI generation panic", "details": fmt.Sprintf("%v", r)})
+			}
+		}()
+
+		spec, err := buildOpenAPISpec(router, isProduction)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "failed to generate OpenAPI document"})
+			c.JSON(500, gin.H{"error": "failed to build OpenAPI spec", "details": err.Error()})
 			return
 		}
 
-		// Log successful generation for debugging
-		if logger := c.MustGet("logger"); logger != nil {
-			if sugar, ok := logger.(*zap.SugaredLogger); ok {
-				sugar.Infof("OpenAPI spec generated successfully, size: %d bytes", len(payload))
-			}
+		payload, err := json.MarshalIndent(spec, "", "  ")
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to marshal OpenAPI document", "details": err.Error()})
+			return
 		}
 
 		c.Data(200, "application/json; charset=utf-8", payload)
 	}
 }
 
-func buildOpenAPISpec(router *gin.Engine, isProduction bool) map[string]any {
+func buildOpenAPISpec(router *gin.Engine, isProduction bool) (map[string]any, error) {
 	routes := router.Routes()
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Path == routes[j].Path {
@@ -111,38 +116,38 @@ func buildOpenAPISpec(router *gin.Engine, isProduction bool) map[string]any {
 
 	servers := []map[string]string{{"url": "/"}}
 
-	return map[string]any{
-		"openapi": openAPIVersion,
-		"info": map[string]any{
-			"title":       "Absensholat API",
-			"version":     specVersion,
-			"description": "Explicit, endpoint-complete API reference for development in Scalar.",
-		},
-		"servers": servers,
-		"tags": []map[string]string{
-			{"name": "auth", "description": "Authentication, sessions, token refresh, and account recovery."},
-			{"name": "statistics", "description": "Daily attendance analytics and dashboard summaries."},
-			{"name": "notifications", "description": "Operational notifications for staff."},
-			{"name": "attendance", "description": "Attendance automation, QR attendance, and attendance history."},
-			{"name": "reports", "description": "CSV and Excel export endpoints."},
-			{"name": "backups", "description": "Backup state, confirmation, and cleanup workflows."},
-			{"name": "students", "description": "Student CRUD and student attendance write operations."},
-			{"name": "student-control", "description": "Admin-only bulk progression and rollover operations."},
-			{"name": "prayer-schedules", "description": "Prayer schedule listing and management."},
-			{"name": "system", "description": "Runtime health and metrics endpoints."},
-		},
-		"components": map[string]any{
-			"securitySchemes": map[string]any{
-				"BearerAuth": map[string]any{
-					"type":         "http",
-					"scheme":       "bearer",
-					"bearerFormat": "JWT",
-				},
+		return map[string]any{
+			"openapi": openAPIVersion,
+			"info": map[string]any{
+				"title":       "Absensholat API",
+				"version":     specVersion,
+				"description": "Explicit, endpoint-complete API reference for development in Scalar.",
 			},
-			"schemas": schemaComponents(),
-		},
-		"paths": paths,
-	}
+			"servers": servers,
+			"tags": []map[string]string{
+				{"name": "auth", "description": "Authentication, sessions, token refresh, and account recovery."},
+				{"name": "statistics", "description": "Daily attendance analytics and dashboard summaries."},
+				{"name": "notifications", "description": "Operational notifications for staff."},
+				{"name": "attendance", "description": "Attendance automation, QR attendance, and attendance history."},
+				{"name": "reports", "description": "CSV and Excel export endpoints."},
+				{"name": "backups", "description": "Backup state, confirmation, and cleanup workflows."},
+				{"name": "students", "description": "Student CRUD and student attendance write operations."},
+				{"name": "student-control", "description": "Admin-only bulk progression and rollover operations."},
+				{"name": "prayer-schedules", "description": "Prayer schedule listing and management."},
+				{"name": "system", "description": "Runtime health and metrics endpoints."},
+			},
+			"components": map[string]any{
+				"securitySchemes": map[string]any{
+					"BearerAuth": map[string]any{
+						"type":         "http",
+						"scheme":       "bearer",
+						"bearerFormat": "JWT",
+					},
+				},
+				"schemas": schemaComponents(),
+			},
+			"paths": paths,
+		}, nil
 }
 
 func explicitOperations() map[string]operationSpec {

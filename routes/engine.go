@@ -121,22 +121,28 @@ func SetupEngine(db *gorm.DB, logger *zap.SugaredLogger, isProduction bool) *gin
 		router.Use(gin.Recovery())
 	}
 
-	// Register OpenAPI routes before SetupRoutes to avoid potential shadowing
+	SetupRoutes(router, db, logger)
+
+	// Register OpenAPI routes after SetupRoutes
 	router.GET("/openapi.json", docs.OpenAPIJSONHandler(router, isProduction))
 	router.GET("/docs", docs.ScalarDocsHandler("Absensholat API Reference (Development)", "/openapi.json"))
+	router.GET("/test-route", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "Test route working",
+			"path": c.Request.URL.Path,
+		})
+	})
 	router.GET("/health", func(c *gin.Context) {
 		healthCheck(c, db)
 	})
 	router.GET("/version", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"version":     "2.0.0",
-			"build_time":  "2026-04-30T18:10:33+07:00", // Update with actual build time
-			"commit":      "unknown", // Update with git commit if available
+			"build_time":  "2026-04-30T18:10:33+07:00",
+			"commit":      "unknown",
 		})
 	})
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
-
-	SetupRoutes(router, db, logger)
 
 	if !isProduction {
 		// Only wrap DefaultServeMux for pprof
