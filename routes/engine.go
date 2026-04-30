@@ -17,6 +17,19 @@ import (
 	"absensholat-api/middleware"
 )
 
+// createDocumentationHandler wraps a handler with documentation-specific security middleware
+func createDocumentationHandler(handler gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Apply documentation security middleware
+		middleware.DocumentationSecurityMiddleware()(c)
+
+		// Continue with the actual handler if not aborted
+		if !c.IsAborted() {
+			handler(c)
+		}
+	}
+}
+
 func GinMiddleware(sugar *zap.SugaredLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -106,6 +119,7 @@ func SetupEngine(db *gorm.DB, logger *zap.SugaredLogger, isProduction bool) *gin
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.RequestID())
+	router.Use(middleware.ForwardedProtoMiddleware())
 
 	if isProduction {
 		router.Use(middleware.HTTPSEnforcement())
@@ -123,9 +137,9 @@ func SetupEngine(db *gorm.DB, logger *zap.SugaredLogger, isProduction bool) *gin
 
 	SetupRoutes(router, db, logger)
 
-	// Register OpenAPI routes after SetupRoutes
-	router.GET("/openapi.json", docs.OpenAPIJSONHandler(router, isProduction))
-	router.GET("/docs", docs.ScalarDocsHandler("Absensholat API Reference (Development)", "/openapi.json"))
+	// Documentation routes with relaxed security for mixed content compatibility
+	router.GET("/openapi.json", createDocumentationHandler(docs.OpenAPIJSONHandler(router, isProduction)))
+	router.GET("/docs", createDocumentationHandler(docs.ScalarDocsHandler("Absensholat API Reference (Development)", "/openapi.json")))
 	router.GET("/test-route", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "Test route working",

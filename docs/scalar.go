@@ -33,6 +33,17 @@ func ScalarDocsHandler(title, specPath string) gin.HandlerFunc {
 		if c.Request.TLS != nil {
 			scheme = "https"
 		}
+
+		// Check X-Forwarded-Proto header for reverse proxies (Cloudflare, etc.)
+		if forwardedProto := c.GetHeader("X-Forwarded-Proto"); forwardedProto != "" {
+			scheme = forwardedProto
+		}
+
+		// Force HTTPS in production (Cloudflare Tunnel scenario)
+		if scheme == "http" && c.GetHeader("CF-RAY") != "" {
+			scheme = "https"
+		}
+
 		host := c.Request.Host
 		specURL := scheme + "://" + host + specPath
 

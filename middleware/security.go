@@ -142,3 +142,49 @@ func generateRequestID() string {
 			".", ""),
 		"-", "")
 }
+
+// ForwardedProtoMiddleware handles X-Forwarded-Proto header from reverse proxies
+func ForwardedProtoMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Check if the request came through Cloudflare or other reverse proxy
+		if cfRay := c.GetHeader("CF-RAY"); cfRay != "" {
+			// Force HTTPS for Cloudflare Tunnel requests
+			c.Request.Header.Set("X-Forwarded-Proto", "https")
+		} else if forwardedProto := c.GetHeader("X-Forwarded-Proto"); forwardedProto != "" {
+			// Trust the forwarded proto from other proxies
+			// Could add validation here if needed
+		}
+
+		c.Next()
+	}
+}
+
+// DocumentationSecurityMiddleware configures security headers for API documentation
+func DocumentationSecurityMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Only apply to documentation routes
+		if c.Request.URL.Path == "/docs" || c.Request.URL.Path == "/openapi.json" {
+			// Allow connections to Cloudflare tunnel domains (both HTTP and HTTPS)
+			// This resolves mixed content issues when Scalar documentation loads JSON specs
+			tunnelDomain := c.Request.Host
+			c.Writer.Header().Set("Content-Security-Policy",
+				"default-src 'self'; "+
+				"script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net; "+
+				"connect-src 'self' https://"+tunnelDomain+" http://"+tunnelDomain+" https://cdn.jsdelivr.net; "+
+				"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;")
+
+			// Enable CORS for API documentation access
+			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+			// Handle preflight OPTIONS requests
+			if c.Request.Method == "OPTIONS" {
+				c.AbortWithStatus(204)
+				return
+			}
+		}
+
+		c.Next()
+	}
+}

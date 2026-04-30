@@ -116,7 +116,7 @@ func buildOpenAPISpec(router *gin.Engine, isProduction bool) (map[string]any, er
 
 	servers := []map[string]string{{"url": "/"}}
 
-		return map[string]any{
+	return map[string]any{
 			"openapi": openAPIVersion,
 			"info": map[string]any{
 				"title":       "Absensholat API",
